@@ -73,7 +73,8 @@ STAGE_BINDING_SCHEMA = {"requirements": [str], "evidence": [str]}
 RECEIPT_IDENTITY_SCHEMA = {"fields": [str], "volatile_fields_excluded_from_digest": [str]}
 EVIDENCE_KINDS = {"source", "command", "review", "tool"}
 RECEIPT_EVIDENCE = ("EV-STRUCTURE", "EV-DESIGN-COMPILE", "EV-DESIGN-SOURCE")
-TEST_METHOD = re.compile(r"@Test\b(?:\s*@\w+(?:\([^)]*\))?)*\s*(?:public\s+|protected\s+)?void\s+(\w+)\s*\(")
+JAVA_TEST_METHOD = re.compile(r"@Test\b(?:\s*@\w+(?:\([^)]*\))?)*\s*(?:public\s+|protected\s+)?void\s+(\w+)\s*\(")
+KOTLIN_TEST_METHOD = re.compile(r"@Test\b(?:\s*@\w+(?:\([^)]*\))?)*\s*(?:public\s+|internal\s+|private\s+)?fun\s+(\w+)\s*\(")
 
 
 class ToolError(Exception):
@@ -125,14 +126,15 @@ def type_name(expected) -> str:
 
 # ---------------------------------------------------------------- structure rules
 
-def check_spec(root: Path) -> list[dict]:
+def check_spec(root: Path, spec_path: str = SPEC, test_dirs: tuple[str, ...] = (TEST_DIR,),
+               require_targets: bool = True) -> list[dict]:
     findings: list[dict] = []
 
     def fail(code, pointer, message):
         findings.append({"rule": code, "pointer": pointer, "message": message})
 
     try:
-        spec = load_strict(root / SPEC)
+        spec = load_strict(root / spec_path)
     except (OSError, ValueError) as error:
         fail("S001", "/", f"strict parse failed: {error}")
         return findings
@@ -225,13 +227,19 @@ def check_spec(root: Path) -> list[dict]:
         fail("R002", "/acceptance", f"acceptance {missing} is not referenced by any requirement")
 
     test_methods = set()
-    for test_file in sorted((root / TEST_DIR).glob("*.java")):
-        for method in TEST_METHOD.findall(test_file.read_text(encoding="utf-8")):
-            test_methods.add(f"{test_file.stem}#{method}")
+    if require_targets:
+        for test_dir in test_dirs:
+            directory = root / test_dir
+            for pattern, matcher in (("*.java", JAVA_TEST_METHOD), ("*.kt", KOTLIN_TEST_METHOD)):
+                for test_file in sorted(directory.rglob(pattern)):
+                    for method in matcher.findall(test_file.read_text(encoding="utf-8")):
+                        test_methods.add(f"{test_file.stem}#{method}")
     for index, acceptance in enumerate(spec["acceptance"]):
         for field in ("when", "then", "target"):
             if not acceptance[field].strip():
                 fail("S003", f"/acceptance/{index}/{field}", "empty field")
+        if not require_targets:
+            continue
         target = acceptance["target"]
         script = target.split()[0] if target else ""
         if "#" in target:
@@ -595,7 +603,12 @@ def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--root", type=Path, default=REPO_ROOT, help="repository root")
     commands = parser.add_subparsers(dest="command", required=True)
-    commands.add_parser("check")
+    check_parser = commands.add_parser("check")
+    check_parser.add_argument("--spec", default=SPEC, help="repository-relative feature specification")
+    check_parser.add_argument("--test-dir", action="append", dest="test_dirs",
+                              help="repository-relative test source directory; repeatable")
+    check_parser.add_argument("--planned-targets", action="store_true",
+                              help="validate acceptance target syntax without requiring implementation files")
     receipt_parser = commands.add_parser("receipt")
     receipt_parser.add_argument("--out", type=Path)
     verify_parser = commands.add_parser("verify")
@@ -606,7 +619,8 @@ def main(argv: list[str]) -> int:
 
     try:
         if args.command == "check":
-            findings = check_spec(root)
+            findings = check_spec(root, args.spec, tuple(args.test_dirs or (TEST_DIR,)),
+                                  require_targets=not args.planned_targets)
             print(json.dumps({"status": "PASS" if not findings else "FAIL", "findings": findings}, indent=2))
             return 0 if not findings else 1
         if args.command == "receipt":

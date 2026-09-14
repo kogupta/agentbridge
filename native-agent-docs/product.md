@@ -58,6 +58,7 @@ This table is the one canonical decision registry until `workflow.md` moves deci
 | NULLNESS | No JSpecify/NullAway. Existing JetBrains annotations plus constructor/boundary validation. No whole-program null-safety claim. |
 | OBSERVABILITY | IntelliJ `Logger` for bounded technical diagnostics plus a tiny run-owned `RunStats`. No OpenTelemetry, exporters, metrics registry, event bus or custom JFR events. |
 | FORMAL_TOOL_DEFAULT | None. A targeted Quint spike only if admission interleavings stay materially uncertain after explicit state/API design. |
+| PROMPT_CACHE | Within one cache generation, each provider request is a byte-exact prefix extension of the previous request. Cache resets are explicit typed boundaries. See Prompt-cache stability. |
 | DONOR_SUBTRACTION | Done before dogfood, by owner decision. The donor runtime and PSI tool packages are removed on `native-agent-workflow`. Native tools are written fresh from the contracts in this file; donor code on `master` is reference evidence only, never an extraction source or fallback path. Dogfood still compares against Pi + idea-facade. Remove any remaining donor-only dependency or packaging as soon as nothing native reaches it. |
 
 ## Pi fidelity
@@ -154,6 +155,8 @@ I11. Editors, listeners, run resources, callbacks and processes have explicit co
 
 I12. Tool arguments/results and provider requests are bounded. A conservative context budget is enforced before dispatch. Context-full ends with an actionable New Session instruction; no compaction.
 
+I13. Within one `CacheGeneration`, the complete cache-relevant serialized request N is an exact prefix of request N+1. Instructions, tool definitions, tool order and serialization never change inside a generation. Mutable IDE or repository state never enters that prefix. A violation outside an explicit reset boundary is a bug and throws before dispatch.
+
 ## Tool catalog
 
 Fourteen flat tool IDs for the semantic MVP, plus the deferred `run_command`. The catalog size is a ceiling, not a target. Do not recreate operations behind a generic dispatcher visible to the model. Native schemas narrow donor schemas and never advertise unsupported options. Results carry usable identity and pagination/completeness metadata. Do not parse human-readable donor output to invent typed fields.
@@ -223,7 +226,7 @@ Kept for re-entry only. Complexity it adds: process ownership, bounded buffering
 10. SSE: LF/CRLF, comments, multiline data, UTF-8 split across chunks at any byte, final frame without blank line. `[DONE]` does not replace a terminal response. Assemble items by provider index/ID and validate identity. Support text, reasoning summary/encrypted reasoning and function-call argument events. Normalize `response.done/completed/incomplete` as Pi does. Unknown optional events may be ignored; unknown required item types reject the response.
 11. Accepted replay items (encrypted reasoning and IDs, assistant text IDs/phase, function-call item ID/call_id/name/arguments) stay as immutable provider metadata on the assistant message. Tool results map to `function_call_output` with the original `call_id`. No IDs built from text parsing, no dropped reasoning item.
 12. Limits (application limits, not model context claims): 1 MiB per SSE event, 4 MiB decoded stream per request, 128 KiB per argument object, 32 calls per response, 64 KiB request JSON, 1 MiB display transcript with oldest-display eviction. Run limits: 20 model responses, 100 tool invocations, 15-minute deadline; exceeding one stops before new effects and fills skipped results. Above the request cap, stop with `CONTEXT_FULL`. Provider context-length errors are not retried. Log counts, not bodies.
-13. Retry at most once per provider request, only before acceptance: transient transport/EOF, 429 excluding quota/billing, or 5xx. Delay 1 s or a valid `Retry-After` up to 10 s; above that report the wait. Roll back provisional UI before retry. Auth refresh retry shares the two-attempt ceiling. No retry for malformed content, unsupported model, bad schema, billing/quota, context limit, Stop or executed calls.
+13. Retry at most once per provider request, only before acceptance: transient transport/EOF, 429 excluding quota/billing, or 5xx. Delay 1 s or use a valid `Retry-After` from 0 through 10 s. A missing or malformed value uses 1 s. A negative or above-10-second value is not silently clamped or automatically waited; return the rate-limit outcome with the requested wait when available. Roll back provisional UI before retry. Auth refresh retry shares the two-attempt ceiling. No retry for malformed content, unsupported model, bad schema, billing/quota, context limit, Stop or executed calls.
 
 ## Run behavior
 
@@ -247,6 +250,103 @@ Draft text is not part of a request until Send. Double Send is rejected before a
 | Tool failure after side effect | `FAILED_AFTER_START` and touched paths | No replay | No automatic continuation; user inspects |
 | Oversize / context cap | Nothing silently truncated | No new effects | Limit error / New Session |
 
+## Prompt-cache stability
+
+Goal: high prompt-cache reuse follows from the architecture, not from provider tuning. The cache-hit percentage is a metric. The invariant is I13.
+
+### Rules
+
+1. **Append-only accepted context.** Turns and tool rounds only append items. Accepted items are never rewritten, reordered, normalized again, summarized, merged, deleted or regenerated from mutable state. Render each accepted item to its provider wire form once, at acceptance, and keep those bytes immutable. Replay reuses the stored bytes and does not serialize domain values again.
+2. **Stable request head.** Instructions, the attached instruction file, tool definitions, tool order, `prompt_cache_key` and every request field under native control are fixed for the generation. Codecs are generated and deterministic: fixed field order, no map iteration order, no locale or clock input. Do not interpolate dynamic data into the head: time, git status, active editor, diagnostics, trust state, plan phase, IDE capabilities, token usage or repository changes. That data reaches the model only as appended tool results.
+3. **Stable capability surface.** The flat tool catalog is fixed per session. No capability discovery, MCP server change or IDE state can change the provider-visible tool list. A native `IDE` dispatcher tool is not introduced: the fixed catalog already meets this rule, and the Tool catalog forbids a model-visible generic dispatcher. Reopen that choice only if a later feature needs a changing capability set.
+4. **Workflow state is not prompt state.** A future phase change (inspect, plan, implement, verify, review) is a runtime transition. It never swaps instructions or regenerates history. Phase guidance, if needed, is a new tail item.
+5. **Incompatible contexts get separate generations.** A different model or a materially different instruction/tool context is a separate session. MODEL already requires this. Future planner/executor splits follow the same rule.
+6. **Bounded at insertion, not rewritten later.** Tool results are bounded when first accepted (I12). Large content is retrieved explicitly by ranged tools. Old results are never shrunk to save context.
+7. **Rejected output never enters the prefix.** Provisional or rejected responses (Stop during output, malformed or duplicate IDs, EOF) are never appended. A retry sends the identical bytes of the failed attempt. Display-transcript eviction affects only the display, never the request.
+
+### Runtime model
+
+```java
+record CacheGeneration(CacheGenerationId id, PrefixFingerprint fingerprint) {}
+
+sealed interface CacheReset permits SessionStart, ModelChange, ExplicitContextReset {}
+```
+
+`PrefixFingerprint` digests the canonical request head: model ID, instructions, attached instruction file, tool definitions in order and codec version. Before each dispatch, the run driver compares the new serialized request with the previous request of the same generation. If the previous request is not an exact prefix, the driver throws. A new generation starts only through a `CacheReset` value.
+
+MVP reset boundaries: `SessionStart`, `ModelChange` and `ExplicitContextReset` (New Session). All three already happen only at idle. `Compaction`, `ConversationRewind` and `IncompatibleToolContractChange` are not variants in the MVP, because no MVP feature produces them. Each one enters the sealed type together with the feature that needs it (see Out of scope).
+
+These operations never reset the generation: user turn, tool call, tool result, IDE state change, git state change, diagnostics change, build/test result. Plan-phase change, permission change and capability discovery have no MVP form. When one of them enters, it gets the same rule and a prefix test.
+
+### Violation diagnostic
+
+A failed prefix check reports the first divergence, not only a percentage:
+
+```text
+CACHE PREFIX VIOLATION
+
+previous bytes:  83,492
+reused bytes:    14,821
+reuse:           17.7%
+
+first divergence:
+  component: tools
+  tool: find_references
+  field: description
+  byte: 391
+
+previous: "..."
+current:  "..."
+```
+
+`component` is one of `head`, `instructions`, `tools` or `input[index]`. Excerpts are bounded and follow I10: tests print them, production logs record only component, index, field and byte offsets.
+
+### Telemetry
+
+`RunStats` records, per provider call and per session:
+
+```text
+structural prefix reuse: 98.7%
+provider reported cache: 96.2%
+```
+
+Structural reuse is `reused bytes / previous request bytes` and is always available. Provider-reported cache comes from the Codex terminal response usage when present. Before implementation, check the exact usage field in Pi `openai-codex-responses.ts`. If the provider reports nothing, show only structural reuse. This stays inside OBSERVABILITY: no exporter or registry.
+
+### Regression tests
+
+A fake provider captures the exact serialized request of every call. For every consecutive pair in one generation, the test asserts `commonPrefix(requestN, requestN1) == requestN` and prints the violation diagnostic on failure. Cover:
+
+- ordinary multi-turn conversation;
+- several tool rounds in one run;
+- semantic reads and symbol queries;
+- mutations, including `FAILED_AFTER_START`;
+- build and test execution;
+- diagnostics that change between calls;
+- git or file-system changes outside the agent between calls;
+- Stop, `TRUNCATED_NOT_EXECUTED`, rejected response and request retry;
+- New Session and model change, which must produce a new generation and never a violation.
+
+Benchmark: a scripted long session through the fake provider must exceed 90% structural reuse after warm-up (first two calls excluded). A reset without a `CacheReset` value fails the test.
+
+### Stretch target
+
+In dogfood with a live Codex account and real repository tasks, target steady-state provider-reported cache hits of at least 95%, and more than 90% after warm-up. Classify every call below 90% as exactly one of:
+
+- expected explicit reset;
+- provider-side behavior;
+- native prefix-stability bug.
+
+"The harness built the prompt differently" is not a valid fourth category. The stretch target is a measurement, not a Go gate.
+
+### Acceptance
+
+- Requests are append-only within a generation, checked on every dispatch.
+- Instructions, tool schemas and tool order are stable across turns and runs of a session.
+- Mutable IDE and repository state cannot change the existing prefix.
+- Reset boundaries exist as the sealed `CacheReset` type, and no other path starts a generation.
+- Tests report the exact first divergence.
+- The scripted benchmark exceeds 90% structural reuse after warm-up.
+
 ## UI
 
 Read-only Editor transcript plus a separate `EditorTextField`; Send, Stop, New Session; status; login/logout/model controls; trusted-session enablement. Coalesce streamed display at 50 ms without unbounded queued deltas. Preserve draft and caret while streaming, disable Send during a run, support copy and source links. Show pending diagnostics, tool outcomes, partial answers and cancellation honestly. No approval buttons, branch browser, Markdown engine, persisted transcript or steering queue. No `NativeChatPanel`/`NativeMarkdownPane` inheritance. Browser/JCEF screenshots do not verify this UI.
@@ -258,11 +358,11 @@ Each milestone becomes a feature closure that passes SPEC_VALID and DESIGN_VALID
 | # | Milestone | Behavior | Required proof |
 |---|---|---|---|
 | 0 | Lifecycle/admission slice | Run ownership, sequential admission, Stop, terminal accounting | `lifecycle-admission/` S1–S3. In progress. |
-| 1 | Domain and run driver | Java algebra, minimal Kotlin driver, sequential continuation, accepted/provisional split, Stop accounting, run limits | Platform-free tests: multi-call order, unknown/schema failure, length/malformed rejection, double Send, Stop in each state, resource-registration vs cancel race, no replay, late result retained, limits and retry scope with fake clock/transport. Coroutine lifetime smoke. |
-| 2 | Native semantic reads | Seven read tools, handles, readiness, no MCP/HTTP | Same-name overloads, unrelated same-name class, reference vs text occurrence, unsaved editor read, ambiguity, pagination/incomplete, indexing timeout, handle eviction/invalidation. Real IDE operations. |
-| 3A | Semantic mutation | `replace_symbol_body`, `edit_text`, `write_file`, rename, undo, admission | Overload replacement with two declarations on one line; stale read/symbol rejected; queued Stop before EDT commit leaves file unchanged; admitted op settles before idle; rename without unrelated matches; rename usage-change race changes nothing; new-file/symlink race; undo of edit/create/rename. |
-| 3B | Verification | Diagnostics, build, targeted tests, run-owned formatting | Format cancellation without deferred mutation; diagnostics failure is not clean; pending is not clean; targeted failing and passing test; busy/cancel lifecycle. |
-| 4 | Codex auth/transport | Login, PasswordSafe, SSE, replay, retry | Fake OAuth: state mismatch, duplicate params, port conflict with manual URL on same verifier, expiry, malformed token, listener cleanup, concurrent refresh vs logout. Fake HTTP: text/reasoning/calls, identity, split UTF-8/CRLF/multiline/EOF, terminal statuses, duplicate IDs, malformed args, oversize, cancellation; second request replays reasoning and pairs results. Manual live smoke with a real account. If account/policy access is unavailable, the stage is blocked. |
+| 1 | Domain and run driver | Java algebra, minimal Kotlin driver, sequential continuation, accepted/provisional split, Stop accounting, run limits, `CacheGeneration`/`CacheReset`, dispatch-time prefix check | Platform-free tests: multi-call order, unknown/schema failure, length/malformed rejection, double Send, Stop in each state, resource-registration vs cancel race, no replay, late result retained, limits and retry scope with fake clock/transport. Prefix tests and scripted >90% structural-reuse benchmark (Prompt-cache stability). Coroutine lifetime smoke. |
+| 2 | Native semantic reads | Seven read tools, handles, readiness, no MCP/HTTP | Same-name overloads, unrelated same-name class, reference vs text occurrence, unsaved editor read, ambiguity, pagination/incomplete, indexing timeout, handle eviction/invalidation. Real IDE operations. Prefix test across reads with changing editor/index state. |
+| 3A | Semantic mutation | `replace_symbol_body`, `edit_text`, `write_file`, rename, undo, admission | Overload replacement with two declarations on one line; stale read/symbol rejected; queued Stop before EDT commit leaves file unchanged; admitted op settles before idle; rename without unrelated matches; rename usage-change race changes nothing; new-file/symlink race; undo of edit/create/rename. Prefix test across mutations. |
+| 3B | Verification | Diagnostics, build, targeted tests, run-owned formatting | Format cancellation without deferred mutation; diagnostics failure is not clean; pending is not clean; targeted failing and passing test; busy/cancel lifecycle. Prefix test across changing diagnostics and build/test results. |
+| 4 | Codex auth/transport | Login, PasswordSafe, SSE, replay, retry | Fake OAuth: state mismatch, duplicate params, port conflict with manual URL on same verifier, expiry, malformed token, listener cleanup, concurrent refresh vs logout. Fake HTTP: text/reasoning/calls, identity, split UTF-8/CRLF/multiline/EOF, terminal statuses, duplicate IDs, malformed args, oversize, cancellation; second request replays reasoning and pairs results. Deterministic codec bytes; retry sends identical bytes; provider cache usage parsed when present. Manual live smoke with a real account. If account/policy access is unavailable, the stage is blocked. |
 | 5 | Native UI | Tool window workflow and content lifetime | Real task through UI; typing while streaming; double Send; Stop during request, read, queued and admitted mutation; New Session invalidation; close/reopen with no leaked editor or stale UI; token-free logs and errors. |
 | 6 | Dogfood decision | Compare against Pi + idea-facade | See Dogfood gate. |
 | 7 | Cutover and subtraction | Native registrations only; remove unreachable donor runtime | Done early by owner decision (DONOR_SUBTRACTION). Remaining obligation: startup and plugin archive evidence that no donor runtime is registered or packaged. |
@@ -286,7 +386,7 @@ Correctness gates: no wrong-target edit; stale edit rejected; rename references 
 - **Adjust:** semantic tools help, but discovery/identity/result contracts repeatedly force avoidable fallback.
 - **Stop:** no semantic advantage on the chosen tasks, or native lifecycle complexity outweighs the benefit. Do not add features to hide this result.
 
-`RunStats` exists only to make this decision factual. Include only fields that answer dogfood questions, for example provider calls, tool calls, tool failures, semantic resolutions, stale-handle failures, mutations attempted/completed, builds and tests run, elapsed time, provider wait vs tool time, Stop latency. Render a bounded summary; do not persist it initially or grow it into a metrics registry, event bus or tracing API. Logs may include run ID, call ID, tool name, state transition, outcome category, duration and cancellation events.
+`RunStats` exists only to make this decision factual. Include only fields that answer dogfood questions, for example provider calls, tool calls, tool failures, semantic resolutions, stale-handle failures, mutations attempted/completed, builds and tests run, elapsed time, provider wait vs tool time, Stop latency. Include structural prefix reuse and provider-reported cache per call and per session (Prompt-cache stability). Render a bounded summary; do not persist it initially or grow it into a metrics registry, event bus or tracing API. Logs may include run ID, call ID, tool name, state transition, outcome category, duration and cancellation events.
 
 ## Out of scope
 
@@ -295,7 +395,7 @@ Later features re-enter only through demonstrated need, not "we will obviously n
 | Feature | Why excluded | Re-entry |
 |---|---|---|
 | Multiple providers, direct API keys, device OAuth | Does not test IntelliJ-native semantics; creates abstraction pressure | After Go, with a real second provider |
-| Persistent sessions, SQLite, branching, compaction, import/export | Storage, migration, privacy, recovery | After Go, if real sessions need it |
+| Persistent sessions, SQLite, branching, compaction, import/export | Storage, migration, privacy, recovery | After Go, if real sessions need it. Compaction and rewind enter as `CacheReset` variants, only near real context pressure. |
 | Semantic memory / vector search / Lucene | Unrelated to the coding loop | After Go, with a concrete memory use case |
 | MCP server/client, ACP/external agents | The experiment removes that hop | Not part of native architecture |
 | JCEF/web chat, Node/TypeScript frontend | Native Swing UI is part of the experiment | Only if native UI cannot support a required interaction |

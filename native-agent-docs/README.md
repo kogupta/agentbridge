@@ -4,7 +4,7 @@ Each fact has one home. If two files seem to say the same thing, the file named 
 
 | File | Owns |
 |---|---|
-| `product.md` | Hypothesis, requirements R1–R6, decision registry, Pi fidelity, invariants I1–I12, tool and Codex contracts, run behavior, roadmap, dogfood gate, exclusions, donor evidence. |
+| `product.md` | Hypothesis, requirements R1–R6, decision registry, Pi fidelity, invariants I1–I13, prompt-cache stability, tool and Codex contracts, run behavior, roadmap, dogfood gate, exclusions, donor evidence. |
 | `workflow.md` | Principles, workflow invariants W1–W8, artifact layout, SPEC_VALID and DESIGN_VALID gates, reviewer contract, failure routing, current slice stages. |
 | `lifecycle-admission/spec.json` | Canonical LC-001–LC-012, AC-001–AC-013, type-safety audit, operation matrix, null boundaries, evidence IDs, stage bindings. |
 | `lifecycle-admission/design.md` | Java surface, transitions, admission algorithm, precedence rules. References `spec.json` for tables. |

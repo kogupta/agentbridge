@@ -1,0 +1,861 @@
+{
+  "format_version": 1,
+  "feature": "CAP-DOMAIN-RUN-DRIVER",
+  "scope": "Platform-free Java conversation, prompt-cache prefix policy, and run policy plus the minimal Kotlin coroutine driver. Depends on the frozen CAP-LIFECYCLE-ADMISSION API for run ownership, actual-boundary effect admission, Stop ordering, and terminal effect accounting. Provider-specific JSON codecs, IntelliJ tools, UI, authentication, HTTP/SSE, PSI, and persistence are excluded; this feature owns immutable cache-relevant byte framing and dispatch-time prefix enforcement.",
+  "decisions": {
+    "core_language": "REF:product.md#CORE_LANGUAGE",
+    "tool_execution": "REF:product.md#TOOL_EXECUTION",
+    "truncation": "REF:product.md#TRUNCATION",
+    "async": "REF:product.md#ASYNC",
+    "outcomes": "REF:product.md#OUTCOMES",
+    "run_owner": "REF:product.md#RUN_OWNER",
+    "run_limits": "20_RESPONSES_100_CALLS_15_MINUTES",
+    "retry": "ONE_REQUEST_LOCAL_RETRY_BEFORE_ACCEPTANCE",
+    "lifecycle": "REUSE_FROZEN_CAP_LIFECYCLE_ADMISSION",
+    "prompt_cache": "REF:product.md#PROMPT_CACHE"
+  },
+  "requirements": [
+    {
+      "id": "DR-001",
+      "statement": "A session accepts at most one run at a time; a rejected concurrent Send appends no user message and starts no provider request.",
+      "acceptance": [
+        "AC-001"
+      ]
+    },
+    {
+      "id": "DR-002",
+      "statement": "Accepted history contains distinct immutable user, assistant, and tool-result messages; provisional assistant output is separate and is never included in a provider request.",
+      "acceptance": [
+        "AC-002",
+        "AC-006"
+      ]
+    },
+    {
+      "id": "DR-003",
+      "statement": "Only a terminal boundary result with complete wire structure, unique call IDs, syntactically complete arguments, and a validated ordered call plan may enter accepted history or create a lifecycle batch.",
+      "acceptance": [
+        "AC-003",
+        "AC-005"
+      ]
+    },
+    {
+      "id": "DR-004",
+      "statement": "Accepted calls execute sequentially in source order; each call receives exactly one terminal tool-result message before any continuation request.",
+      "acceptance": [
+        "AC-004"
+      ]
+    },
+    {
+      "id": "DR-005",
+      "statement": "Unknown tools and invalid call schemas produce operation-local NOT_STARTED error results; they perform no tool effect, do not invalidate valid sibling calls, and preserve source order. Every accepted call, including a prevalidated rejection, enters the lifecycle batch; the driver settles a rejection through lifecycle execution with a synchronous accounting callback that invokes no tool.",
+      "acceptance": [
+        "AC-004"
+      ]
+    },
+    {
+      "id": "DR-006",
+      "statement": "A LENGTH response with text only accepts marked incomplete text and ends idle; LENGTH with validated calls accepts the assistant and records TRUNCATED_NOT_EXECUTED for every call without admitting effects; malformed fragments accept nothing.",
+      "acceptance": [
+        "AC-005"
+      ]
+    },
+    {
+      "id": "DR-007",
+      "statement": "Stop during a provider attempt discards provisional output and accepts no assistant; Stop before tool admission records CANCELLED_NOT_STARTED for that and all remaining calls.",
+      "acceptance": [
+        "AC-006",
+        "AC-007"
+      ]
+    },
+    {
+      "id": "DR-008",
+      "statement": "Stop after tool admission cancels the cooperative run token, admits no later call, waits for the admitted operation and owned resources to settle, and retains the operation's real terminal result before returning idle.",
+      "acceptance": [
+        "AC-008",
+        "AC-012"
+      ]
+    },
+    {
+      "id": "DR-009",
+      "statement": "A tool failure after admission records FAILED_AFTER_START with its real outcome and touched paths, cancels remaining calls, makes no continuation request, and is never replayed automatically.",
+      "acceptance": [
+        "AC-009"
+      ]
+    },
+    {
+      "id": "DR-010",
+      "statement": "Provider retries are scoped to one request and occur at most once before response acceptance, only for transient transport or EOF, 429 excluding quota or billing, and 5xx failures. Retry clears provisional output and cannot execute or replay calls. Malformed content, unsupported model, bad schema, billing or quota, context limit, Stop, and executed calls never retry.",
+      "acceptance": [
+        "AC-010"
+      ]
+    },
+    {
+      "id": "DR-011",
+      "statement": "Retry delay is one second when Retry-After is absent or malformed, or the exact requested duration when a valid value is zero through ten seconds. A negative or above-ten-second value is not clamped or automatically waited; it produces a terminal rate-limit outcome that retains the requested wait when available.",
+      "acceptance": [
+        "AC-010"
+      ]
+    },
+    {
+      "id": "DR-012",
+      "statement": "Run policy permits at most 20 accepted model responses, 100 admitted tool invocations, and 15 elapsed minutes; a reached limit starts no new effect, records RUN_LIMIT_NOT_STARTED for already accepted skipped calls, and makes no further provider request.",
+      "acceptance": [
+        "AC-011"
+      ]
+    },
+    {
+      "id": "DR-013",
+      "statement": "A provider retry before acceptance and every later continuation request use the accepted-history snapshot exactly once; provisional or rejected responses and already completed effects are never duplicated.",
+      "acceptance": [
+        "AC-009",
+        "AC-010"
+      ]
+    },
+    {
+      "id": "DR-014",
+      "statement": "Registering an owned cancellable resource and cancelling its registry share one synchronization boundary; cancellation first closes a later registration immediately, while registration first is closed by cancellation exactly once.",
+      "acceptance": [
+        "AC-012"
+      ]
+    },
+    {
+      "id": "DR-015",
+      "statement": "The Kotlin driver is a child of its supplied coroutine scope, exposes no GlobalScope or blocking EDT bridge, and closes or settles all run-owned work before terminal completion or disposal.",
+      "acceptance": [
+        "AC-013"
+      ]
+    },
+    {
+      "id": "DR-016",
+      "statement": "Java owns all accepted-history, call-plan, limit, result, and transition policy; Kotlin owns only coroutine execution and adapters, and neither JSON nor IntelliJ platform types enter the Java domain.",
+      "acceptance": [
+        "AC-014"
+      ]
+    },
+    {
+      "id": "DR-017",
+      "statement": "Each session owns one CacheGeneration identified by a validated CacheGeneration.Id and PrefixFingerprint; only the sealed reset reasons SessionStart, ModelChange, and ExplicitContextReset create a generation. SessionStart creates the initial session generation, ModelChange labels the replacement session generation after the old session reaches idle, and ExplicitContextReset replaces the current idle session generation; no in-place active-run reset exists.",
+      "acceptance": [
+        "AC-015"
+      ]
+    },
+    {
+      "id": "DR-018",
+      "statement": "The stable request head and every accepted model-visible item are converted to immutable cache-relevant bytes exactly once at their ownership boundary; later requests concatenate stored bytes without rerendering, rewriting, reordering, deleting, or interpolating mutable IDE or repository state.",
+      "acceptance": [
+        "AC-016",
+        "AC-018"
+      ]
+    },
+    {
+      "id": "DR-019",
+      "statement": "Before every provider dispatch after the first in one CacheGeneration, the new cache-relevant request must start with every byte of the previous request. A mismatch throws CachePrefixViolation before transport dispatch, then the driver stops and settles the run to IDLE before propagating it. The violation reports component, field, item index when applicable, byte offset, prior length, candidate length, and reused-byte count without production content excerpts.",
+      "acceptance": [
+        "AC-016",
+        "AC-017"
+      ]
+    },
+    {
+      "id": "DR-020",
+      "statement": "A request retry reuses the identical immutable request bytes; rejected and provisional output add no bytes; explicit reset starts a fresh comparison basis. The deterministic 20-dispatch same-generation benchmark excludes the first two calls and computes aggregate reuse as total common-prefix bytes divided by total previous-request bytes; it must exceed 90 percent while covering user, assistant, tool-result, truncation, Stop, and rejected-output paths.",
+      "acceptance": [
+        "AC-016",
+        "AC-018"
+      ]
+    }
+  ],
+  "acceptance": [
+    {
+      "id": "AC-001",
+      "when": "Start one run, attempt a second Send before settlement, then inspect accepted history and provider calls.",
+      "then": "The second Send is rejected as BUSY; exactly one user message and one provider request exist.",
+      "target": "RunDomainTest#doubleSendDoesNotAppendOrDispatch"
+    },
+    {
+      "id": "AC-002",
+      "when": "Stream provisional text, capture a request snapshot, then accept a terminal assistant response.",
+      "then": "The request snapshot excludes provisional text; acceptance clears provisional state and appends one immutable assistant message.",
+      "target": "RunDomainTest#provisionalOutputIsNotAcceptedHistory"
+    },
+    {
+      "id": "AC-003",
+      "when": "Submit duplicate call IDs, malformed arguments, and an unsupported required output from the provider boundary.",
+      "then": "No assistant or result message is accepted and no lifecycle batch or tool effect starts.",
+      "target": "NativeRunDriverTest#malformedTerminalResponseRejectsWholeTurn"
+    },
+    {
+      "id": "AC-004",
+      "when": "Accept ordered calls [valid A, unknown B, invalid-schema C, valid D].",
+      "then": "A and D effects run once in order; B and C run no effect; four ordered terminal results are accepted before one continuation request.",
+      "target": "NativeRunDriverTest#executesValidatedCallsSequentiallyBeforeContinuation"
+    },
+    {
+      "id": "AC-005",
+      "when": "Return LENGTH text-only, LENGTH with valid calls, and LENGTH with malformed call fragments in separate runs.",
+      "then": "Text-only is accepted incomplete; valid calls receive TRUNCATED_NOT_EXECUTED with zero effects; malformed fragments accept nothing; every run ends idle.",
+      "target": "NativeRunDriverTest#appliesLengthOutcomeMatrix"
+    },
+    {
+      "id": "AC-006",
+      "when": "Stop while a provider attempt has provisional output but no terminal response.",
+      "then": "The request resource closes, provisional output clears, no partial assistant is accepted, and the run settles idle.",
+      "target": "NativeRunDriverTest#stopDuringRequestDiscardsProvisionalOutput"
+    },
+    {
+      "id": "AC-007",
+      "when": "Stop after a multi-call response is accepted but before the first queued effect crosses lifecycle admission.",
+      "then": "Every call receives CANCELLED_NOT_STARTED, no effect runs, and no continuation request occurs.",
+      "target": "NativeRunDriverTest#stopBeforeAdmissionAccountsEveryCall"
+    },
+    {
+      "id": "AC-008",
+      "when": "Stop after the first of two calls crosses lifecycle admission and complete that call after Stop.",
+      "then": "The first real result is retained, the second is CANCELLED_NOT_STARTED, no continuation occurs, and idle is reached only after completion.",
+      "target": "NativeRunDriverTest#lateAdmittedResultIsRetainedBeforeIdle"
+    },
+    {
+      "id": "AC-009",
+      "when": "A tool reports a side effect followed by failure and the next provider request would replay prior history.",
+      "then": "One FAILED_AFTER_START result with touched paths is retained; later calls and continuation do not run; the effect count remains one.",
+      "target": "NativeRunDriverTest#failedStartedEffectIsNotReplayed"
+    },
+    {
+      "id": "AC-010",
+      "when": "Use a fake transport and clock for each retryable and non-retryable category, including Retry-After boundaries.",
+      "then": "Only eligible first attempts retry; delay and attempt counts match policy; provisional output rolls back; no accepted response or tool call is duplicated.",
+      "target": "NativeRunDriverTest#retryIsRequestLocalAndBounded"
+    },
+    {
+      "id": "AC-011",
+      "when": "Reach each response, tool, and deadline boundary with calls pending at the tool boundary.",
+      "then": "Counts at the limit are permitted; the next request or effect is refused; accepted skipped calls receive RUN_LIMIT_NOT_STARTED; no count exceeds its cap.",
+      "target": "NativeRunDriverTest#enforcesRunLimitsBeforeNewWork"
+    },
+    {
+      "id": "AC-012",
+      "when": "Race resource registration against cancellation under barriers, including an admitted tool that completes after cancellation.",
+      "then": "Each resource closes exactly once, no registration escapes, and the admitted tool's terminal result remains accepted.",
+      "target": "NativeRunDriverTest#resourceRegistrationCancellationRaceRetainsLateResult"
+    },
+    {
+      "id": "AC-013",
+      "when": "Launch a run in a supplied parent scope, cancel the parent during request and admitted tool phases, and wait for child completion.",
+      "then": "The child terminates, owned resources settle, no continuation starts, and no driver coroutine survives the parent.",
+      "target": "NativeRunDriverCoroutineSmokeTest#driverLifetimeIsBoundToParentScope"
+    },
+    {
+      "id": "AC-014",
+      "when": "Inspect compiled production dependencies for the domain package and coroutine ownership for Kotlin sources.",
+      "then": "Domain classes depend only on Java, annotations, and the lifecycle package; coroutine and platform types occur only in Kotlin driver/adapters; JSON and IntelliJ types are absent.",
+      "target": "DomainArchitectureTest#domainBoundaryHasNoJsonPlatformOrCoroutineTypes"
+    },
+    {
+      "id": "AC-015",
+      "when": "Start an initial session generation; replace an idle session for model change; request explicit context reset while active and idle.",
+      "then": "SessionStart labels the initial generation; ModelChange labels only a replacement session generation; ExplicitContextReset replaces only an idle session generation; active reset is rejected and no other reason is representable.",
+      "target": "PromptCacheTest#cacheGenerationRequiresExplicitReset"
+    },
+    {
+      "id": "AC-016",
+      "when": "Capture consecutive request bytes through ordinary user turns, tool rounds, rejected output, Stop, truncation, one retry, and an explicit reset.",
+      "then": "Every same-generation candidate extends the previous bytes exactly; retry bytes are identical; rejected output adds nothing; reset begins a new comparison basis.",
+      "target": "PromptCacheTest#dispatchRejectsNonPrefixAndRetryReusesBytes"
+    },
+    {
+      "id": "AC-017",
+      "when": "Change one byte in the stable head and one stored input item without a CacheReset.",
+      "then": "Dispatch throws before transport, the run settles idle, and the violation identifies component, field, item index where applicable, byte offset, lengths, and reused bytes without content.",
+      "target": "PromptCacheTest#prefixViolationReportsFirstDivergence"
+    },
+    {
+      "id": "AC-018",
+      "when": "Run the pinned deterministic 20-dispatch same-generation fake-provider script spanning user, assistant, tool-result, truncation, Stop, and rejected-output paths; exclude its first two calls.",
+      "then": "Every dispatch passes the prefix invariant and total common-prefix bytes divided by total previous-request bytes exceeds 90 percent.",
+      "target": "PromptCacheTest#scriptedSessionExceedsNinetyPercentReuse"
+    }
+  ],
+  "type_safety_audit": [
+    {
+      "requirement": "DR-001",
+      "invalid": "Two active runs or a rejected Send already present in history",
+      "type_api_prevention": "One final session owner composes one RunLifecycle; only a successful start returns a run capability that can append the submitted user message",
+      "residual_runtime_obligation": "Atomic start-before-append ordering and lifecycle BUSY rejection",
+      "justification": "Java references cannot encode project-wide singleton ownership; the existing synchronized lifecycle is the frozen authority"
+    },
+    {
+      "requirement": "DR-002",
+      "invalid": "Provisional text represented as accepted history or mutable accepted messages",
+      "type_api_prevention": "Sealed accepted message algebra with immutable payloads and a distinct provisional observation type outside the accepted list",
+      "residual_runtime_obligation": "Driver clears provisional state on accept, retry, Stop, and terminal failure",
+      "justification": "Stream callbacks are external and ordered at runtime"
+    },
+    {
+      "requirement": "DR-003",
+      "invalid": "Partial or structurally invalid provider output creates an executable batch",
+      "type_api_prevention": "Boundary result separates rejected output from a validated assistant turn whose batch factory establishes complete unique ordered calls",
+      "residual_runtime_obligation": "Provider adapter must validate wire completion before constructing the accepted variant",
+      "justification": "Wire validity is external evidence and cannot be proven by Java types before parsing"
+    },
+    {
+      "requirement": "DR-004",
+      "invalid": "Continuation before every accepted call has one ordered result",
+      "type_api_prevention": "Nonempty validated call plan and ordered result ledger correlated by distinct Call.Id values",
+      "residual_runtime_obligation": "Single Kotlin loop executes one index at a time and checks settled ledger before requesting continuation",
+      "justification": "Coroutine scheduling and effect completion are runtime events"
+    },
+    {
+      "requirement": "DR-005",
+      "invalid": "Unknown or invalid call accidentally reaches a tool implementation",
+      "type_api_prevention": "Sealed planned-call variants distinguish executable calls from prevalidated rejection calls while one validated plan supplies every accepted Call.Id to the lifecycle batch",
+      "residual_runtime_obligation": "Driver switches exhaustively and settles a rejected variant through lifecycle execution with a synchronous accounting callback that creates its NOT_STARTED result and invokes no tool",
+      "justification": "Available tool names and schemas are captured external configuration"
+    },
+    {
+      "requirement": "DR-006",
+      "invalid": "Length-truncated call executes or malformed fragments enter history",
+      "type_api_prevention": "Distinct terminal response variants for complete, length-text, length-validated-calls, and rejected fragments",
+      "residual_runtime_obligation": "Driver maps each variant to the specified terminal action",
+      "justification": "Provider finish reason is known only at runtime"
+    },
+    {
+      "requirement": "DR-007",
+      "invalid": "Stopped provisional response or pending effect becomes accepted/executing",
+      "type_api_prevention": "Provisional state carries no accepted-message constructor and lifecycle owns pending-call cancellation",
+      "residual_runtime_obligation": "Stop closes current request resource and snapshots lifecycle cancellation results",
+      "justification": "Stop and callbacks race across threads"
+    },
+    {
+      "requirement": "DR-008",
+      "invalid": "Admitted work is reported cancelled-not-started or idle precedes its result",
+      "type_api_prevention": "Lifecycle executing status and operation-local terminal result variants distinguish admitted outcomes",
+      "residual_runtime_obligation": "Driver cancellation handler awaits admitted completion and calls finishRun only after owned work settles",
+      "justification": "Arbitrary admitted operations have no static liveness guarantee"
+    },
+    {
+      "requirement": "DR-009",
+      "invalid": "Failed side effect is retried or followed by another call/request",
+      "type_api_prevention": "FAILED_AFTER_START terminal result is distinct from NOT_STARTED failures",
+      "residual_runtime_obligation": "Driver stops the lifecycle and ends the loop on this outcome",
+      "justification": "Touched paths and partial platform effects are runtime observations"
+    },
+    {
+      "requirement": "DR-010",
+      "invalid": "Retry after acceptance or a third transport attempt",
+      "type_api_prevention": "Request-local two-attempt controller is created anew for each provider request and cannot contain accepted output",
+      "residual_runtime_obligation": "Driver exhaustively classifies transient transport or EOF, eligible 429, 5xx, and the enumerated non-retryable failures before incrementing attempts",
+      "justification": "Transport failures arrive asynchronously"
+    },
+    {
+      "requirement": "DR-011",
+      "invalid": "Unbounded, negative, silently clamped, or invented retry delay",
+      "type_api_prevention": "Validated retry-delay outcome separates exact allowed Duration, one-second default, and terminal rate-limit policy",
+      "residual_runtime_obligation": "Boundary parses Retry-After, retains an out-of-range requested wait for the terminal outcome, and clock performs only an allowed exact delay",
+      "justification": "Header content is unsound external input"
+    },
+    {
+      "requirement": "DR-012",
+      "invalid": "Provider response, tool effect, or elapsed duration exceeds a run cap",
+      "type_api_prevention": "Immutable validated RunLimits and a run-owned budget with named admission outcomes",
+      "residual_runtime_obligation": "Clock and counters are checked immediately before every request and actual effect admission",
+      "justification": "Elapsed time and admitted counts change at runtime"
+    },
+    {
+      "requirement": "DR-013",
+      "invalid": "A retry or continuation duplicates accepted messages, results, or effects",
+      "type_api_prevention": "Immutable accepted-history snapshots and run-local unique call identities; provisional attempts have no append authority",
+      "residual_runtime_obligation": "Driver appends once at terminal acceptance and never loops back over a settled call ledger",
+      "justification": "External callbacks can repeat and must be ignored or rejected at runtime"
+    },
+    {
+      "requirement": "DR-014",
+      "invalid": "A resource registered after cancellation remains open or closes twice",
+      "type_api_prevention": "Final run-owned registry with private entries and idempotent close state",
+      "residual_runtime_obligation": "One monitor linearizes registration, removal, and cancellation",
+      "justification": "Java ownership is not affine and registration races cancellation"
+    },
+    {
+      "requirement": "DR-015",
+      "invalid": "Driver work outlives its parent or blocks the EDT waiting for cancellation",
+      "type_api_prevention": "Kotlin driver requires a caller-owned CoroutineScope and exposes no independent global scope constructor",
+      "residual_runtime_obligation": "Structured child jobs, cancellable waits, and nonblocking cleanup are verified by coroutine smoke",
+      "justification": "Coroutine lifetime is a runtime property"
+    },
+    {
+      "requirement": "DR-016",
+      "invalid": "JSON, PSI, IntelliJ, provider SDK, or coroutine types leak into Java domain policy",
+      "type_api_prevention": "Dedicated Java domain package uses normalized values and operation-local outcomes; Kotlin adapter package owns suspend ports",
+      "residual_runtime_obligation": "Architecture test inspects compiled dependencies and source language boundary",
+      "justification": "Build dependencies and future edits can violate package layering"
+    },
+    {
+      "requirement": "DR-017",
+      "invalid": "Generation changes without a typed reset or while a run is active",
+      "type_api_prevention": "Final CacheGeneration with controlled factory and sealed CacheReset variants limited to SessionStart, ModelChange, and ExplicitContextReset",
+      "residual_runtime_obligation": "RunSession rejects active explicit reset; model change constructs a replacement session generation only after the old session is idle",
+      "justification": "Session run state and reset requests race at runtime"
+    },
+    {
+      "requirement": "DR-018",
+      "invalid": "Accepted history or stable head is rerendered from mutable values",
+      "type_api_prevention": "Immutable RequestHead and AcceptedModelItem byte owners defensively copy input and expose copies; CacheGeneration stores append-only item ownership",
+      "residual_runtime_obligation": "Boundary renderer is called once per accepted item and never during replay",
+      "justification": "Provider-specific rendering is an external boundary operation"
+    },
+    {
+      "requirement": "DR-019",
+      "invalid": "A non-prefix request reaches transport or a diagnostic leaks request content",
+      "type_api_prevention": "CachePrefixGuard accepts immutable CacheRequest values and throws a dedicated metadata-only CachePrefixViolation carrying component, field, optional item index, and offsets",
+      "residual_runtime_obligation": "Kotlin driver invokes guard immediately before transport and routes violation through Stop and finish before rethrow",
+      "justification": "Byte equality and dispatch ordering require runtime comparison"
+    },
+    {
+      "requirement": "DR-020",
+      "invalid": "Retry regenerates bytes, rejected output mutates the prefix, or structural reuse silently regresses",
+      "type_api_prevention": "Request-local attempt retains one CacheRequest; only accepted-item append can create the next same-generation request",
+      "residual_runtime_obligation": "Prefix regression tests and the pinned 20-dispatch benchmark measure total common-prefix bytes over total previous-request bytes after warm-up",
+      "justification": "Reuse ratio depends on actual serialized byte lengths and call sequence"
+    }
+  ],
+  "audit_dimensions": [
+    "sum types",
+    "state payloads",
+    "validated values",
+    "constructor authority",
+    "transitions",
+    "argument/result correlation",
+    "collection invariants",
+    "aliasing/ownership",
+    "protocol progression",
+    "visibility",
+    "nullness"
+  ],
+  "non_goals": [
+    "Provider-specific JSON, SSE, HTTP, OAuth, credentials, or live model integration",
+    "IntelliJ PSI, semantic tools, mutations, diagnostics, build/test adapters, or UI",
+    "A generic provider framework, effects runtime, Result type, event bus, persistence layer, or duplicate lifecycle state machine",
+    "Parallel tool execution, steering, follow-up queues, compaction, replay recovery, or automatic model fallback",
+    "Changing CAP-LIFECYCLE-ADMISSION declarations or semantics",
+    "Quint, Alloy, P, OpenSpec, or Spec Kit without a newly identified unresolved question"
+  ],
+  "assumptions": [
+    "CAP-LIFECYCLE-ADMISSION remains frozen and qualified; its actual-boundary admission and Stop accounting are trusted dependencies.",
+    "The provider boundary supplies normalized terminal variants and validated call plans; raw JSON is a later feature.",
+    "Tool adapters cooperate with the run cancellation token when possible; safety does not assume arbitrary admitted work terminates.",
+    "The supplied coroutine scope is owned by the future IntelliJ content lifetime; this slice verifies only structured child ownership with platform-free coroutines.",
+    "Monotonic elapsed-time observations from the injected clock do not move backward within one run.",
+    "Domain CANCELLED_NOT_STARTED maps from lifecycle CANCELLED_BEFORE_START; domain DISPOSED maps from lifecycle CLOSED; RUN_LIMIT_NOT_STARTED has no lifecycle terminal status because the limit check occurs before actual effect admission."
+  ],
+  "evidence": [
+    {
+      "id": "EV-SOURCE",
+      "kind": "source",
+      "description": "Current product/workflow/lifecycle source hashes and verified Pi ranges for sequential continuation, truncation, and request-local retry."
+    },
+    {
+      "id": "EV-STRUCTURE",
+      "kind": "command",
+      "description": "Strict parse plus identity, reference, audit, matrix, null-boundary, and stage-binding checks for CAP-DOMAIN-RUN-DRIVER."
+    },
+    {
+      "id": "EV-SPEC-REVIEW",
+      "kind": "review",
+      "description": "Fresh semantic review of the exact specification digest with zero unresolved blocking findings."
+    },
+    {
+      "id": "EV-DESIGN-SOURCE",
+      "kind": "source",
+      "description": "Frozen Java and Kotlin declarations installed once in production and mapped bidirectionally to requirements."
+    },
+    {
+      "id": "EV-DESIGN-COMPILE",
+      "kind": "command",
+      "description": "User-executed :plugin-core:classes result for the exact frozen declarations and build configuration."
+    },
+    {
+      "id": "EV-DESIGN-REVIEW",
+      "kind": "review",
+      "description": "Fresh two-direction semantic and type-safety review of the exact spec, design, and declarations with zero unresolved blocking findings."
+    },
+    {
+      "id": "EV-RECEIPT",
+      "kind": "tool",
+      "description": "Exact-basis receipt binding feature, spec, design, declarations, configuration, evidence, and status hashes."
+    },
+    {
+      "id": "EV-FOCUSED",
+      "kind": "command",
+      "description": "Focused domain and Kotlin driver tests with nonzero discovered tests and passing counts."
+    },
+    {
+      "id": "EV-SMOKE",
+      "kind": "command",
+      "description": "Separately executed coroutine lifetime smoke covering parent cancellation during provider and admitted-tool phases."
+    },
+    {
+      "id": "EV-BUILD",
+      "kind": "command",
+      "description": "User-executed affected plugin-core build and buildPlugin results."
+    },
+    {
+      "id": "EV-IMPLEMENTATION-REVIEW",
+      "kind": "review",
+      "description": "Independent bounded review against the frozen surface with all Blockers and Majors resolved."
+    },
+    {
+      "id": "EV-PREFIX",
+      "kind": "command",
+      "description": "Dispatch-time prefix, retry byte identity, explicit reset, first-divergence diagnostic, and scripted greater-than-90-percent structural reuse tests."
+    }
+  ],
+  "stages": [
+    {
+      "id": "S1",
+      "entry": [
+        {
+          "requirements": [
+            "DR-001",
+            "DR-016",
+            "DR-017"
+          ],
+          "evidence": [
+            "EV-SOURCE"
+          ]
+        }
+      ],
+      "exit": [
+        {
+          "requirements": [
+            "DR-001",
+            "DR-002",
+            "DR-003",
+            "DR-004",
+            "DR-005",
+            "DR-006",
+            "DR-007",
+            "DR-008",
+            "DR-009",
+            "DR-010",
+            "DR-011",
+            "DR-012",
+            "DR-013",
+            "DR-014",
+            "DR-015",
+            "DR-016",
+            "DR-017",
+            "DR-018",
+            "DR-019",
+            "DR-020"
+          ],
+          "evidence": [
+            "EV-STRUCTURE",
+            "EV-SPEC-REVIEW"
+          ]
+        }
+      ],
+      "outcome": "SPEC_VALID for the exact normalized feature basis; no design or implementation claim"
+    },
+    {
+      "id": "S2",
+      "depends_on": [
+        "S1"
+      ],
+      "entry": [
+        {
+          "requirements": [
+            "DR-001",
+            "DR-016",
+            "DR-017"
+          ],
+          "evidence": [
+            "EV-STRUCTURE",
+            "EV-SPEC-REVIEW"
+          ]
+        }
+      ],
+      "exit": [
+        {
+          "requirements": [
+            "DR-001",
+            "DR-002",
+            "DR-003",
+            "DR-004",
+            "DR-005",
+            "DR-006",
+            "DR-007",
+            "DR-008",
+            "DR-009",
+            "DR-010",
+            "DR-011",
+            "DR-012",
+            "DR-013",
+            "DR-014",
+            "DR-015",
+            "DR-016",
+            "DR-017",
+            "DR-018",
+            "DR-019",
+            "DR-020"
+          ],
+          "evidence": [
+            "EV-DESIGN-SOURCE",
+            "EV-DESIGN-COMPILE",
+            "EV-DESIGN-REVIEW",
+            "EV-RECEIPT"
+          ]
+        }
+      ],
+      "outcome": "DESIGN_VALID; implementation surface frozen"
+    },
+    {
+      "id": "S3",
+      "depends_on": [
+        "S2"
+      ],
+      "entry": [
+        {
+          "requirements": [
+            "DR-001",
+            "DR-016",
+            "DR-017"
+          ],
+          "evidence": [
+            "EV-DESIGN-SOURCE",
+            "EV-DESIGN-COMPILE",
+            "EV-DESIGN-REVIEW",
+            "EV-RECEIPT"
+          ]
+        }
+      ],
+      "exit": [
+        {
+          "requirements": [
+            "DR-001",
+            "DR-002",
+            "DR-003",
+            "DR-004",
+            "DR-005",
+            "DR-006",
+            "DR-007",
+            "DR-008",
+            "DR-009",
+            "DR-010",
+            "DR-011",
+            "DR-012",
+            "DR-013",
+            "DR-014",
+            "DR-015",
+            "DR-016",
+            "DR-017",
+            "DR-018",
+            "DR-019",
+            "DR-020"
+          ],
+          "evidence": [
+            "EV-FOCUSED",
+            "EV-PREFIX",
+            "EV-SMOKE",
+            "EV-BUILD",
+            "EV-IMPLEMENTATION-REVIEW"
+          ]
+        }
+      ],
+      "outcome": "Platform-free domain and minimal Kotlin driver feature closure qualified"
+    }
+  ],
+  "open_decisions": [],
+  "operation_matrix": [
+    {
+      "operation": "send",
+      "phase": "IDLE",
+      "result": "Started and user accepted",
+      "next_phase": "REQUESTING"
+    },
+    {
+      "operation": "send",
+      "phase": "REQUESTING|EXECUTING_TOOLS|STOPPING",
+      "result": "Rejected(BUSY), no append",
+      "next_phase": "unchanged"
+    },
+    {
+      "operation": "providerProvisional",
+      "phase": "REQUESTING",
+      "result": "Replace provisional observation only",
+      "next_phase": "REQUESTING"
+    },
+    {
+      "operation": "providerCompleteText",
+      "phase": "REQUESTING",
+      "result": "Accept assistant",
+      "next_phase": "IDLE"
+    },
+    {
+      "operation": "providerCompleteCalls",
+      "phase": "REQUESTING",
+      "result": "Accept assistant and begin ordered batch",
+      "next_phase": "EXECUTING_TOOLS"
+    },
+    {
+      "operation": "providerLengthText",
+      "phase": "REQUESTING",
+      "result": "Accept incomplete assistant",
+      "next_phase": "IDLE"
+    },
+    {
+      "operation": "providerLengthCalls",
+      "phase": "REQUESTING",
+      "result": "Accept assistant and TRUNCATED_NOT_EXECUTED results",
+      "next_phase": "IDLE"
+    },
+    {
+      "operation": "providerMalformed",
+      "phase": "REQUESTING",
+      "result": "Reject turn and clear provisional",
+      "next_phase": "IDLE"
+    },
+    {
+      "operation": "retryableFailureFirstAttempt",
+      "phase": "REQUESTING",
+      "result": "Clear provisional and delay once",
+      "next_phase": "REQUESTING"
+    },
+    {
+      "operation": "terminalFailure",
+      "phase": "REQUESTING",
+      "result": "Visible categorized failure, no acceptance",
+      "next_phase": "IDLE"
+    },
+    {
+      "operation": "callTerminal",
+      "phase": "EXECUTING_TOOLS",
+      "result": "Append one correlated result",
+      "next_phase": "EXECUTING_TOOLS|REQUESTING"
+    },
+    {
+      "operation": "callFailedAfterStart",
+      "phase": "EXECUTING_TOOLS",
+      "result": "Append real failure and cancel remaining",
+      "next_phase": "STOPPING"
+    },
+    {
+      "operation": "stop",
+      "phase": "REQUESTING",
+      "result": "Close request, discard provisional",
+      "next_phase": "STOPPING"
+    },
+    {
+      "operation": "stop",
+      "phase": "EXECUTING_TOOLS",
+      "result": "Cancel pending, signal admitted work",
+      "next_phase": "STOPPING"
+    },
+    {
+      "operation": "ownedResourcesSettled",
+      "phase": "STOPPING",
+      "precondition": "no admitted call remains",
+      "result": "Finish lifecycle after request or cleanup settlement",
+      "next_phase": "IDLE"
+    },
+    {
+      "operation": "admittedCallSettles",
+      "phase": "STOPPING",
+      "result": "Append real result; finish after resources settle",
+      "next_phase": "IDLE"
+    },
+    {
+      "operation": "dispose",
+      "phase": "IDLE|REQUESTING|EXECUTING_TOOLS|STOPPING",
+      "result": "Cancel and suppress future delivery after settlement",
+      "next_phase": "DISPOSED"
+    },
+    {
+      "operation": "send|providerCallback|callCallback",
+      "phase": "DISPOSED",
+      "result": "Rejected or ignored without mutation",
+      "next_phase": "DISPOSED"
+    },
+    {
+      "operation": "resetGeneration",
+      "phase": "IDLE",
+      "result": "Create generation through ModelChange or ExplicitContextReset",
+      "next_phase": "IDLE"
+    },
+    {
+      "operation": "resetGeneration",
+      "phase": "REQUESTING|EXECUTING_TOOLS|STOPPING",
+      "result": "Rejected(BUSY), generation unchanged",
+      "next_phase": "unchanged"
+    },
+    {
+      "operation": "dispatch",
+      "phase": "REQUESTING",
+      "precondition": "candidate extends prior request in generation",
+      "result": "Record request and invoke transport",
+      "next_phase": "REQUESTING"
+    },
+    {
+      "operation": "dispatch",
+      "phase": "REQUESTING",
+      "precondition": "candidate diverges from prior request in generation",
+      "result": "Throw CachePrefixViolation before transport; Stop and settle run",
+      "next_phase": "IDLE"
+    }
+  ],
+  "receipt_identity": {
+    "fields": [
+      "stage",
+      "feature",
+      "spec_hash",
+      "design_hash",
+      "declaration_hashes",
+      "configuration_identity",
+      "evidence_input_hashes",
+      "evidence_hashes",
+      "status"
+    ],
+    "volatile_fields_excluded_from_digest": [
+      "timestamp"
+    ]
+  },
+  "null_boundary_matrix": [
+    {
+      "operation": "session/message/value constructors",
+      "null_input": "any reference component",
+      "expected": "NullPointerException before domain value exists"
+    },
+    {
+      "operation": "validated call plan factory",
+      "null_input": "list, call, ID, name, arguments, or rejection",
+      "expected": "NullPointerException before plan exists"
+    },
+    {
+      "operation": "send",
+      "null_input": "submission or run configuration",
+      "expected": "NullPointerException before lifecycle start or history append"
+    },
+    {
+      "operation": "provider callback",
+      "null_input": "provisional or terminal boundary value",
+      "expected": "Boundary rejection; no accepted-history mutation"
+    },
+    {
+      "operation": "tool result completion",
+      "null_input": "call identity, outcome, or touched paths",
+      "expected": "NullPointerException before result append; lifecycle remains settling rather than inventing success"
+    },
+    {
+      "operation": "resource registry",
+      "null_input": "resource",
+      "expected": "NullPointerException before registry mutation"
+    },
+    {
+      "operation": "driver construction",
+      "null_input": "session, scope, transport, clock, tool runner, or dispatcher",
+      "expected": "NullPointerException before child job or request starts"
+    },
+    {
+      "operation": "cache generation constructors",
+      "null_input": "generation ID, fingerprint, reset, request head, item, or byte input",
+      "expected": "NullPointerException before cache state mutation"
+    }
+  ]
+}
