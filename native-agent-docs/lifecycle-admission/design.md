@@ -16,16 +16,16 @@ The effect receives no stop signal. Pi passes an abort signal into each running 
 
 | Type | Role | Construction/visibility rule |
 |---|---|---|
-| `Id` | Nonblank call identity | Public record validates non-null/nonblank value. |
-| `Batch` | Nonempty immutable distinct ordered calls | Final class; only `of(List<CallId>)`; snapshots input. |
+| `Call.Id` | Nonblank call identity | Public record validates non-null/nonblank value. |
+| `Call.Batch` | Nonempty immutable distinct ordered calls | Final class; private constructor; only `Call.Batch.of(List<Call.Id>)`; snapshots input. |
 | `RunHandle` | Opaque run capability | Final class; constructor package-private; owner identity private; exposes no observation payload. |
-| `Handle` | Opaque batch capability | Final class; constructor package-private; owner/run identity private. |
-| `Phase` | Closed finite lifecycle phase set | Enum. |
-| `Status` | Closed call status set | Enum; transient and terminal statuses are explicit; only terminal statuses satisfy `isTerminal()`. |
-| `Snapshot` | Read-only lifecycle view | Sealed interface; active payload contains phase only and no capability handle. |
-| `Snapshot` | Immutable call/status pair | Public record validates both components. |
-| `Snapshot` | Read-only ordered status view | Record copies a nonempty ordered list; it exposes no capability handle or owner mutation. |
-| `Observation` | Explicit presence/absence of current batch | Sealed variants; no nullable snapshot. |
+| `Batch.Handle` | Opaque batch capability | Final class; constructor package-private; owner/run identity private. |
+| `Lifecycle.Phase` | Closed finite lifecycle phase set | Enum. |
+| `Call.Status` | Closed call status set | Enum; transient and terminal statuses are explicit; only terminal statuses satisfy `isTerminal()`. |
+| `Lifecycle.Snapshot` | Read-only lifecycle view | Sealed interface with `Idle`, `Active(phase)` and `Closed`; active payload contains phase only and no capability handle. |
+| `Call.Snapshot` | Immutable call/status pair | Public record validates both components. |
+| `Batch.Snapshot` | Read-only ordered status view | Record copies a nonempty ordered list of `Call.Snapshot`; it exposes no capability handle or owner mutation. |
+| `Batch.Observation` | Explicit presence/absence of current batch | Sealed `Present(Batch.Snapshot)` or `Absent`; no nullable snapshot. |
 | `Effect` | Value-free synchronous callback boundary | Functional interface; effect is called only after admission linearizes and cannot return a foreign result object. |
 | `RunLifecycle` | Single owner and transition authority | Final class; all state mutations synchronized; no public state mutation or completion operation. |
 
@@ -73,15 +73,15 @@ This establishes safety. It does not assert that an arbitrary callback eventuall
 
 ## Batch and run rules
 
-`CallBatch.of` establishes nonempty, distinct, ordered immutable calls. `RunLifecycle.beginBatch` rejects a reused `Id` anywhere in the current run, not only in the immediately previous batch. A second batch is rejected while the previous batch is unsettled. The API permits a second batch after the previous batch settles and while the run remains `RUNNING`.
+`Call.Batch.of` establishes nonempty, distinct, ordered immutable calls. `RunLifecycle.beginBatch` rejects a reused `Call.Id` anywhere in the current run, not only in the immediately previous batch. A second batch is rejected while the previous batch is unsettled. The API permits a second batch after the previous batch settles and while the run remains `RUNNING`.
 
-`stop()` and `close()` cancel pending calls in the current batch. They do not invent a result for an executing call. A terminal snapshot is returned as an immutable value; it remains readable after the owner advances or closes. A stale `Handle` cannot query a replaced batch, so the owner retains no historical batch map.
+`stop()` and `close()` cancel pending calls in the current batch. They do not invent a result for an executing call. A terminal snapshot is returned as an immutable value; it remains readable after the owner advances or closes. A stale `Batch.Handle` cannot query a replaced batch, so the owner retains no historical batch map.
 
 ## Operation-by-phase matrix
 
 Canonical table: `spec.json` `operation_matrix`. Precedence rules:
 
-Handle identity is checked before phase-specific rejection when an operation accepts a handle. A rejected operation never mutates state. `close` is the only idempotent lifecycle operation.
+Handle identity is checked before phase-specific rejection when an operation accepts a handle. A rejected operation never mutates state. `close` is idempotent in `CLOSING` and `CLOSED`; `stop` with the current run is idempotent in `STOPPING` and `CLOSING`. `finishRun` is not idempotent: a second call with the same handle is `STALE_RUN`.
 
 `beginBatch` performs every validation before installing the next `BatchState` or mutating `acceptedCallIds`; a rejected mixed batch cannot poison a later fresh call ID.
 

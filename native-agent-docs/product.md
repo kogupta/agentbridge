@@ -6,7 +6,7 @@ This file is the single product authority: hypothesis, decisions, invariants, to
 
 - Independent review of this product scope: **not run**. The original authors performed only an author audit. Do not claim approval.
 - Implementation: only the lifecycle/admission slice exists (`plugin-core/.../nativeagent/lifecycle/`). Its review state is in `lifecycle-admission/review.md`.
-- **Decision not yet reflected in this file:** branch `native-agent-workflow` deliberately removed the donor ACP/JCEF/multi-agent runtime and the PSI tool packages (commit `8791625a9` and later cleanup commits). DONOR_SUBTRACTION, roadmap milestone 7 and the comparison baseline still describe subtraction after a dogfood Go. The owner must update those rows. Donor tool code now exists only on `master`; the donor evidence table at the end of this file refers to `master`.
+- Donor removal: done intentionally, before dogfood. Branch `native-agent-workflow` removed the donor ACP/JCEF/multi-agent runtime and the PSI tool packages (commit `8791625a9` and later cleanup commits). See DONOR_SUBTRACTION. Donor tool code exists only on `master`; the donor evidence table at the end of this file refers to `master`.
 
 ## Hypothesis
 
@@ -28,7 +28,7 @@ Everything in the MVP must contribute to answering that question. A feature does
 | R2 | Model agent behavior after the local Pi source (`/home/muku/depot/personal/cli-tools/pi`), not an invented orchestration framework. |
 | R3 | Use ChatGPT subscription access, not an assumed API key. |
 | R4 | Usable native coding workflow with safe mutations, diagnostics and targeted tests. |
-| R5 | Remove irrelevant AgentBridge runtime after proving the native path. |
+| R5 | Remove irrelevant AgentBridge runtime. Done early by owner decision; see DONOR_SUBTRACTION. |
 | R6 | Hand implementation to another model with a bounded executable specification (`workflow.md`). |
 
 ## Decisions
@@ -58,7 +58,7 @@ This table is the one canonical decision registry until `workflow.md` moves deci
 | NULLNESS | No JSpecify/NullAway. Existing JetBrains annotations plus constructor/boundary validation. No whole-program null-safety claim. |
 | OBSERVABILITY | IntelliJ `Logger` for bounded technical diagnostics plus a tiny run-owned `RunStats`. No OpenTelemetry, exporters, metrics registry, event bus or custom JFR events. |
 | FORMAL_TOOL_DEFAULT | None. A targeted Quint spike only if admission interleavings stay materially uncertain after explicit state/API design. |
-| DONOR_SUBTRACTION | Only after an explicit dogfood Go, before persistence or provider expansion. Stale: the donor was deliberately removed early on this branch (see Status). |
+| DONOR_SUBTRACTION | Done before dogfood, by owner decision. The donor runtime and PSI tool packages are removed on `native-agent-workflow`. Native tools are written fresh from the contracts in this file; donor code on `master` is reference evidence only, never an extraction source or fallback path. Dogfood still compares against Pi + idea-facade. Remove any remaining donor-only dependency or packaging as soon as nothing native reaches it. |
 
 ## Pi fidelity
 
@@ -265,7 +265,7 @@ Each milestone becomes a feature closure that passes SPEC_VALID and DESIGN_VALID
 | 4 | Codex auth/transport | Login, PasswordSafe, SSE, replay, retry | Fake OAuth: state mismatch, duplicate params, port conflict with manual URL on same verifier, expiry, malformed token, listener cleanup, concurrent refresh vs logout. Fake HTTP: text/reasoning/calls, identity, split UTF-8/CRLF/multiline/EOF, terminal statuses, duplicate IDs, malformed args, oversize, cancellation; second request replays reasoning and pairs results. Manual live smoke with a real account. If account/policy access is unavailable, the stage is blocked. |
 | 5 | Native UI | Tool window workflow and content lifetime | Real task through UI; typing while streaming; double Send; Stop during request, read, queued and admitted mutation; New Session invalidation; close/reopen with no leaked editor or stale UI; token-free logs and errors. |
 | 6 | Dogfood decision | Compare against Pi + idea-facade | See Dogfood gate. |
-| 7 | Cutover and subtraction | Native registrations only; remove unreachable donor runtime | Registration/dependency census, startup and archive evidence, build-green deletion commits. Deliberately executed early; see Status. |
+| 7 | Cutover and subtraction | Native registrations only; remove unreachable donor runtime | Done early by owner decision (DONOR_SUBTRACTION). Remaining obligation: startup and plugin archive evidence that no donor runtime is registered or packaged. |
 | 3C | Command escape hatch | `run_command` | Only if dogfood proves it necessary. Flood bounded, Stop kills owned root and reports survivors, VFS refreshed after failing write, dirty-document conflict surfaced. |
 
 After shared contracts freeze, tools and provider work can run in parallel with one integration owner for shared APIs, build files, `plugin.xml` and commits. Sibling workers skip builds while edits are concurrent; the integration owner validates after the wave settles. Persistence, providers and other expansion wait until after subtraction.

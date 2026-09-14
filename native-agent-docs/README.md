@@ -37,9 +37,12 @@ Conflicts resolved during the merge, each by the later explicit user decision al
 - Tool results: sealed domain outcomes; the `status/code` envelope only at the LLM boundary.
 - Session lifetime: tool-window content owns the session.
 
-Issues found and left open, because fixing them changes content rather than layout:
+Issues found during the merge and resolved afterwards:
 
-- The donor runtime was deliberately removed on this branch before any dogfood Go. DONOR_SUBTRACTION and roadmap milestone 7 in `product.md` still say "after Go" and need an owner decision.
-- `design.md` says "`close` is the only idempotent lifecycle operation", but `stop` is also idempotent in `spec.json` and the code.
-- `design.md` Java surface table uses ambiguous names (`Id`, `Handle`, three rows named `Snapshot`, `CallBatch.of`) instead of the real nested types (`Call.Id`, `Batch.Handle`, `Lifecycle.Snapshot`, `Batch.Snapshot`, `Call.Snapshot`, `Call.Batch.of`).
+- Early donor removal is an intentional owner decision, now recorded in `product.md` DONOR_SUBTRACTION, R5 and roadmap milestone 7.
+- `design.md` idempotence rule now matches `spec.json` and the code: `close` and `stop` are idempotent, `finishRun` is not.
+- `design.md` uses the real nested type names (`Call.Id`, `Call.Batch`, `Batch.Handle`, `Lifecycle.Snapshot`, `Call.Snapshot`, `Batch.Snapshot`, `Batch.Observation`).
+
+Still open:
+
 - The ignored `.agent-work/archive/` still holds the 2026-09-13 hardened, strip and merged plans. They are historical and not referenced here.
