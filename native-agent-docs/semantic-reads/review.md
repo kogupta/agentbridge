@@ -4,14 +4,15 @@ Append-only. Review rounds are tied to exact content digests. Acceptance targets
 
 ## Current state
 
-- Workflow state: SPEC_DRAFT; Round 1 findings addressed in revision 1; S1 structure check PASS; fresh review not run
-- Latest round: 1
+- Workflow state: SPEC_INVALID; Round 2 review of revision 1 found 12 Majors; S1 structure check PASS
+- Latest round: 2
 - Spec digest: `4394865678ea7ebaf7be478eca3836e2b7c6829d41cb9a2bb0dbd88126db25d3`
 - Product digest at spec basis: `3ca1c39fe951862e79371b80581bb929df246430dc524ce0015d93e9e6f2624a`
-- Open Blockers: none recorded; 3 Round 1 Blockers addressed, not yet reviewed
-- Open Majors: none recorded; 14 Round 1 Majors addressed, not yet reviewed
-- Reviewer selection: external separate tool (prompt `.agent-work/native-agent-docs/semantic-reads/spec-review-prompt-r2.md`); the Round 1 reviewer session also authored revision 1 and is not eligible
-- Next permitted action: fresh independent specification review of the exact revision 1 digest (EV-SPEC-REVIEW)
+- Open Blockers: none
+- Open Majors: 12 (SR-R2-001 through SR-R2-012)
+- Open Minors: 11 (SR-R2-013 through SR-R2-023)
+- Reviewer selection: Round 2 ran in a fresh-context Claude Code session (Opus 5) from prompt `.agent-work/native-agent-docs/semantic-reads/spec-review-prompt-r2.md`, not in an external separate tool
+- Next permitted action: resolve owner decisions for the Round 2 Majors, revise, and obtain a fresh exact-digest review
 
 ## Round 0 — specification draft
 
@@ -89,3 +90,31 @@ Next permitted action at this basis: resolve owner decisions, revise, and obtain
 - **SR-R1-023 — Addressed.** AC-002 has an exact truncation oracle; AC-003 inserts a new unsaved method.
 
 Next permitted action at this basis: fresh exact-digest specification review.
+
+## Round 2 — independent specification review
+
+- Reviewer: fresh-context Claude Code session (Opus 5), run from `.agent-work/native-agent-docs/semantic-reads/spec-review-prompt-r2.md`; IntelliJ and Pi facts came from `ij-search` and `pi-search` answers
+- Spec digest: `4394865678ea7ebaf7be478eca3836e2b7c6829d41cb9a2bb0dbd88126db25d3`; basis digests for `review.md`, `product.md` and `workflow.md` verified
+- Mechanical command rerun: `python3 scripts/native-spec/check_slice.py check --spec native-agent-docs/semantic-reads/spec.json --planned-targets`; result PASS, zero findings
+- Result: `.agent-work/native-agent-docs/semantic-reads/spec-review-r2.json` (`5ed53275093dacbd49807a65d2f313ed87376c60b8ac93b125119f68ef94bf22`)
+- Platform facts: 17 checked; 1 WRONG (assumption 7: a smart pointer can restore to a replacement declaration); 2 UNVERIFIED (strict method search semantics, symlinked content root lookup)
+- Round 1 dispositions: no Round 1 finding reopened; new findings are in neighboring clauses
+- Verdict: SPEC_INVALID
+
+### Findings
+
+- **SR-R2-001 — Major, open.** Mapping of CallAdmission Limited and Rejected to ToolOutcome has no owner; the ADMISSION matrix row is wrong for the frozen driver.
+- **SR-R2-002 — Major, open.** A read that completes after registry disposal, without run cancellation, has no defined outcome.
+- **SR-R2-003 — Major, open.** A handle or token identifier of the wrong kind has no defined outcome; no typed per-kind key.
+- **SR-R2-004 — Major, open.** Page token reuse after use (replayable or single-use) is undefined.
+- **SR-R2-005 — Major, open.** Next page during INDEXING with a changed count matches both STALE_PAGE and INDEX_NOT_READY rows.
+- **SR-R2-006 — Major, open.** Catalog status, owner and depth of members of anonymous classes, local classes and enum-constant bodies are undefined.
+- **SR-R2-007 — Major, open.** Non-type owner handle and restriction-versus-scope or generated-source outcomes are missing.
+- **SR-R2-008 — Major, open.** Reference range, excerpt anchor and CODE/IMPORT/DOC classification are undefined.
+- **SR-R2-009 — Major, open.** search_text offset base and the outcome for a too-large file scope are undefined.
+- **SR-R2-010 — Major, open.** Canonical comparison of roots for symlinked project paths is undefined.
+- **SR-R2-011 — Major, open.** AC-009 does not discriminate strict search; IMPORT, non-Java and generated references lack acceptance.
+- **SR-R2-012 — Major, open.** LIBRARIES symbol candidates depend on library-source filtering that the spec does not state; no LIBRARIES acceptance for symbols or references.
+- **SR-R2-013 through SR-R2-023 — Minor, open.** Page-token mismatch step, signature edge cases, cancellation listener and throwable type, READ_FAILED categories, query validation, write-action restarts, weak oracles, missing matrix rows, audit wording, assumption 7, fallback hint and find_references target identity.
+
+Next permitted action at this basis: resolve owner decisions, revise, and obtain a fresh exact-digest review.
