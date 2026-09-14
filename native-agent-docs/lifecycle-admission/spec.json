@@ -171,13 +171,13 @@
       "id": "AC-012",
       "when": "Remove an audit binding and alter a frozen source hash in disposable copies.",
       "then": "Bounded artifact/gate check rejects each; valid design shape alone does not mark behavior evidence passed.",
-      "target": "check_slice.py"
+      "target": "scripts/native-spec/check_slice.py selftest"
     },
     {
       "id": "AC-013",
       "when": "Run execute through the real AWT EventQueue behind a latch; exercise Stop-before-runnable and admission-before-Stop orderings separately.",
       "then": "The first ordering invokes no callback; the second ordering records an executing callback and Stop returns without waiting; the owner cannot start another run until settlement.",
-      "target": "lifecycle-admission-awt-smoke"
+      "target": "RunLifecycleTest#awtAdmissionSmoke"
     }
   ],
   "type_safety_audit": [
@@ -303,12 +303,12 @@
     {
       "id": "EV-STRUCTURE",
       "kind": "command",
-      "description": "Strict parse plus identity/reference/audit/matrix/null-boundary/stage-binding checks; expected invalid-copy rejection."
+      "description": "Strict parse plus identity/reference/audit/matrix/null-boundary/stage-binding checks; expected invalid-copy rejection. Command: python3 scripts/native-spec/check_slice.py check; expected invalid-copy rejection: check_slice.py selftest."
     },
     {
       "id": "EV-DESIGN-COMPILE",
       "kind": "command",
-      "description": "Successful javac --release 21 compilation of source-backed declarations under plugin-core/src/main/java/.../nativeagent/lifecycle/; command output and classpath identity retained."
+      "description": "Successful javac --release 21 compilation of source-backed declarations under plugin-core/src/main/java/.../nativeagent/lifecycle/; command output and classpath identity retained. Command: python3 scripts/native-spec/check_slice.py receipt."
     },
     {
       "id": "EV-REVIEW",
@@ -328,7 +328,7 @@
     {
       "id": "EV-SMOKE",
       "kind": "command",
-      "description": "Real AWT EventQueue scenario; callback loses/wins Stop; no model/provider claim"
+      "description": "Real AWT EventQueue scenario run as JUnit method RunLifecycleTest#awtAdmissionSmoke on the java.awt event dispatch thread; callback loses/wins Stop; no model/provider claim"
     },
     {
       "id": "EV-BUILD",
@@ -343,12 +343,12 @@
     {
       "id": "EV-DESIGN-SOURCE",
       "kind": "source",
-      "description": "Hashes and extracted public/package-visible signatures for all source-backed lifecycle declarations."
+      "description": "Hashes and extracted public/package-visible signatures for all source-backed lifecycle declarations. Produced by check_slice.py receipt from javap -package output."
     },
     {
       "id": "EV-RECEIPT",
       "kind": "command",
-      "description": "Exact-basis receipt identity check rejects altered spec, design, declaration/source, configuration or evidence result hashes."
+      "description": "Exact-basis receipt identity check rejects altered spec, design, declaration/source, configuration or evidence result hashes. Command: python3 scripts/native-spec/check_slice.py verify --receipt <path>."
     }
   ],
   "stages": [
