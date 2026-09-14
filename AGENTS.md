@@ -16,6 +16,9 @@
 - A failed or incomplete IDEA Facade response is an infrastructure defect, not evidence that the repository code is wrong. Report unexpected facade behavior with the exact call, expected response, actual response, and workaround. Then use the narrowest safe fallback.
 - A test request that reports zero discovered tests is not a passing test result.
 - Run Gradle through `mtk gradle ...` only. Never run `./gradlew ...` or `gradle ...` directly. Do not invent build or test task names.
+- Documentation, README examples, commit messages, and PR text show the normal human command such as `./gradlew test`; execution uses `mtk gradle ...`.
+- Use `gh` for GitHub operations. Do not call the GitHub API with raw HTTP or curl.
+- Use IDEA Facade for navigation and refactors. Text search is a fallback for known literals, configuration, build logs, and Markdown.
 - Batch independent reads and checks. Use the lightest verification that establishes the needed fact.
 
 ## Design and domain model
@@ -28,6 +31,12 @@
 - One requirement, decision, transition table, and implementation path has one canonical authority. Do not create parallel models, compatibility aliases, or duplicate implementations.
 - Fix root causes. Do not hide unexpected values with plausible defaults, swallowed errors, or silent fallbacks.
 - Keep callbacks, I/O, network access, and heavy computation off the UI thread. Avoid whole-file PSI text/range work on large files when a targeted API exists. Cache only where repeated work justifies it.
+
+## Surgical edits
+
+- Change only what the task requires. Do not delete, rewrite, reformat, reorder imports, rename, or alter comments outside the understood change.
+- Use semantic refactors for cross-file rename, move, signature, and safe-delete changes. Do not use text replacement where the IDE can preserve references.
+- Name unrelated defects without folding them into the current change.
 
 ## UI and testable logic
 
@@ -44,6 +53,7 @@
 - After code changes, run focused tests and the affected build. Before a PR or push, run the relevant unit tests. Record actual commands and outcomes.
 - Resolve every PR review thread with an evidence-backed reply and an explicit resolution. Do not leave addressed threads pending.
 - Preserve the repository-configured Git author and committer identity. Never substitute a model, coding agent, CLI, tool, dependency author, or invented bot identity. Do not add `Co-authored-by` trailers for tools or dependencies. If a hook rejects or rewrites identity, stop and report the mismatch.
+- Never add an AI or coding agent as a co-author, and do not add generated-by footers to commits or PR descriptions.
 - Use the repository's configured GitHub bot path for agent-created PRs or comments. Do not substitute a personal token when bot credentials are required.
 - Rebase branches onto the target branch; do not create merge commits.
 
@@ -64,5 +74,8 @@
 
 - Write direct, evidence-backed prose. Do not use filler, generic praise, rhetorical questions, false certainty, or AI stock phrases.
 - Do not manually wrap prose to an arbitrary column.
-- State constraints, decisions, risks, and verification results. Do not restate the request.
+- Answer first. Default to at most 150 words of prose unless detail prevents loss of a material fact. State constraints, decisions, risks, and verification results without restating the request.
+- Address the user's underlying technical intent regardless of tone. Do not imitate the tone, simplify without cause, flatter, or perform enthusiasm.
+- Cite external empirical, version-specific, or otherwise checkable claims. Mark unverified inferences as inferences; never fabricate a source.
+- Put damage or data-loss warnings before the step they constrain. End with the next action when one exists.
 - Ask a focused question when a missing requirement, authority, or destructive choice cannot be resolved from the repository and user context. Do not fabricate an answer.
