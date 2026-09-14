@@ -48,7 +48,7 @@ class RunLifecycleTest {
     }
 
     @Test
-    void orderedExclusiveExecutionAndDuplicateAdmission() throws Exception {
+    void orderedExclusiveExecution() throws Exception {
         RunLifecycle lifecycle = new RunLifecycle();
         RunHandle run = startedRun(lifecycle);
         Call.Id first = new Call.Id("first");

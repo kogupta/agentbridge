@@ -1,0 +1,700 @@
+{
+  "format_version": 1,
+  "feature": "CAP-LIFECYCLE-ADMISSION",
+  "scope": "Reusable Java lifecycle/admission owner for synchronous effects invoked at their actual execution boundary. Not the provider loop, tool codec, session service or UI integration. Kotlin dispatch integration follows when the native driver exists; no coroutine wrapper is needed by this synchronous core.",
+  "decisions": {
+    "language": "JAVA_21",
+    "coroutines": "KOTLIN_AT_ASYNC_BOUNDARY_ONLY",
+    "state_owner": "ONE_MONITOR_PER_LIFECYCLE_INSTANCE",
+    "completion": "EXPLICIT_DRIVER_FINISH_ACK",
+    "call_ids": "UNIQUE_PER_RUN",
+    "reflection": "NONE_REQUIRED",
+    "nullness": "CONSTRUCTOR_CHECKS_NO_NEW_CHECKER",
+    "effect_start": "LINEARIZED_ADMISSION_AT_ACTUAL_EXECUTION_ENTRY",
+    "receipt_identity": "STAGE_FEATURE_SPEC_DESIGN_SOURCE_CONFIG_EVIDENCE_HASHES"
+  },
+  "requirements": [
+    {
+      "id": "LC-001",
+      "statement": "Only one run may own a lifecycle instance; a busy or closing/closed instance cannot admit another run.",
+      "acceptance": [
+        "AC-001"
+      ]
+    },
+    {
+      "id": "LC-002",
+      "statement": "Each batch is a nonempty immutable ordered collection of distinct nonblank CallIds; malformed batches fail construction before admission.",
+      "acceptance": [
+        "AC-002"
+      ]
+    },
+    {
+      "id": "LC-003",
+      "statement": "Only the next pending call in the current batch may start; at most one effect is executing. Another batch cannot replace an unsettled batch.",
+      "acceptance": [
+        "AC-003"
+      ]
+    },
+    {
+      "id": "LC-004",
+      "statement": "Stop and effect-start admission are linearized under the same monitor at execute entry inside the actual queued runnable. Stop winning prevents callback invocation. Admission winning counts as already started; no enqueue or suspension is allowed between admission and synchronous callback invocation.",
+      "acceptance": [
+        "AC-004",
+        "AC-013"
+      ]
+    },
+    {
+      "id": "LC-005",
+      "statement": "Stop cancels every pending call, retains executing/completed dispositions, and blocks further effects and new runs. Already-started work may finish; finishRun requires a settled batch and explicit driver cleanup acknowledgement.",
+      "acceptance": [
+        "AC-005"
+      ]
+    },
+    {
+      "id": "LC-006",
+      "statement": "Each batch call has exactly one terminal status. Effect has no return value: normal return records COMPLETED; RuntimeException or Error records FAILED_AFTER_START before rethrowing the same object. Lifecycle state retains only the status; no public complete method or automatic replay exists.",
+      "acceptance": [
+        "AC-006"
+      ]
+    },
+    {
+      "id": "LC-007",
+      "statement": "Run and batch handles are opaque identity capabilities; handles from another owner or previous generation cannot start, finish, stop, or overwrite current work. Lifecycle and batch snapshots contain no capability handles. Previously returned immutable snapshots remain readable; a stale handle cannot query a replaced batch.",
+      "acceptance": [
+        "AC-007"
+      ]
+    },
+    {
+      "id": "LC-008",
+      "statement": "close is idempotent: IDLE closes immediately; RUNNING or STOPPING enters CLOSING, cancels pending work and preserves an active run until finishRun acknowledges settlement; CLOSING and CLOSED never reopen.",
+      "acceptance": [
+        "AC-008"
+      ]
+    },
+    {
+      "id": "LC-009",
+      "statement": "Domain values, transitions and outcomes contain no PSI, JSON, coroutine, provider or unconstrained generic result objects. Effect is value-free and execution success is a closed variant. Expected rejection uses operation-local closed outcomes; programmer nulls fail before state mutation.",
+      "acceptance": [
+        "AC-009"
+      ]
+    },
+    {
+      "id": "LC-010",
+      "statement": "No monitor is held while an effect callback runs. Stop must return while a callback is blocked. State inspection returns immutable snapshots, never owner internals.",
+      "acceptance": [
+        "AC-010"
+      ]
+    },
+    {
+      "id": "LC-011",
+      "statement": "A RUNNING run can accept multiple settled batches and must have unique CallIds across that run. beginBatch validates every call and performs no mutation on rejection, including a mixed fresh/reused candidate. Stop/close cancel pending calls; unfinished batches cannot be silently discarded by finishRun.",
+      "acceptance": [
+        "AC-011"
+      ]
+    },
+    {
+      "id": "LC-012",
+      "statement": "Every stage is gated by canonical requirement and evidence IDs for exact frozen inputs. Each invariant has a type/API-first audit row, and each receipt binds stage, feature, spec/design/source hashes, configuration identity and evidence result hashes.",
+      "acceptance": [
+        "AC-012"
+      ]
+    }
+  ],
+  "acceptance": [
+    {
+      "id": "AC-001",
+      "when": "Start twice; finish the first run; start again.",
+      "then": "Second start is BUSY; later start owns a new handle.",
+      "target": "RunLifecycleTest#singleRunOwnership"
+    },
+    {
+      "id": "AC-002",
+      "when": "Construct empty, duplicate-ID and null-containing batches; mutate the input list after valid construction.",
+      "then": "Invalid values rejected; admitted order unaffected by caller mutation.",
+      "target": "RunLifecycleTest#validatedImmutableBatch"
+    },
+    {
+      "id": "AC-003",
+      "when": "Attempt call B before A, call B while A is blocked, and execute A concurrently from two threads using barriers.",
+      "then": "B never invokes; exactly one A callback enters; the losing A attempt is ALREADY_EXECUTING; after A settles, B executes once and another A attempt is ALREADY_TERMINAL.",
+      "target": "RunLifecycleTest#orderedExclusiveExecution"
+    },
+    {
+      "id": "AC-004",
+      "when": "Submit an effect invocation to an executor behind a gate; request Stop before releasing the gate.",
+      "then": "Callback counter remains zero; all pending calls are CANCELLED_BEFORE_START; no effect begins after Stop wins.",
+      "target": "RunLifecycleTest#stopBeforeQueuedEffect"
+    },
+    {
+      "id": "AC-005",
+      "when": "Admit A, block inside its callback, then Stop and attempt finish/start; release A.",
+      "then": "Stop returns without callback release; no B runs; finish/start are rejected until A settles; A is COMPLETED or FAILED_AFTER_START; explicit finish releases the run.",
+      "target": "RunLifecycleTest#stopDuringEffect"
+    },
+    {
+      "id": "AC-006",
+      "when": "Execute value-free effects once with normal return, RuntimeException and AssertionError; attempt each again.",
+      "then": "One terminal status each; thrown object is rethrown unchanged after FAILED_AFTER_START accounting; no replay or nullable result exists.",
+      "target": "RunLifecycleTest#terminalAccounting"
+    },
+    {
+      "id": "AC-007",
+      "when": "Use handles across owners and after starting a new generation; capture an old snapshot, replace the batch, then query with the old handle.",
+      "then": "No current state changes; captured snapshot remains readable and immutable; stale handle query returns STALE_BATCH and exposes no capability.",
+      "target": "RunLifecycleTest#staleHandleIsolation"
+    },
+    {
+      "id": "AC-008",
+      "when": "Stop an active run, close it, close again, settle its active effect and acknowledge cleanup.",
+      "then": "Phase is STOPPING then CLOSING then CLOSED; pending calls cancel, active outcome is retained, close is idempotent, and start remains rejected forever.",
+      "target": "RunLifecycleTest#closeDrainsWithoutReopening"
+    },
+    {
+      "id": "AC-009",
+      "when": "Inspect public signatures/dependencies and pass null to CallId, CallBatch.of, beginBatch, execute, stop, finishRun and batchSnapshot, recording snapshots before each mutating call.",
+      "then": "No forbidden dependency or generic effect result; each null fails before state mutation; no lifecycle or batch snapshot changes.",
+      "target": "RunLifecycleTest#nullInputDoesNotMutate"
+    },
+    {
+      "id": "AC-010",
+      "when": "Block callback; Stop and query from another thread; inspect earlier snapshot after later updates.",
+      "then": "Stop/query return without callback release; earlier snapshot is unchanged.",
+      "target": "RunLifecycleTest#nonblockingStopAndImmutableSnapshots"
+    },
+    {
+      "id": "AC-011",
+      "when": "Finish with calls pending; settle a batch; submit [freshB, reusedA]; then submit freshB in a new batch and finish normally.",
+      "then": "Pending finish rejects; mixed batch rejects without poisoning freshB; freshB later executes; normal finish transitions RUNNING to IDLE and a new run can start.",
+      "target": "RunLifecycleTest#multipleBatchesPreserveIdentity"
+    },
+    {
+      "id": "AC-012",
+      "when": "Remove an audit binding and alter a frozen source hash in disposable copies.",
+      "then": "Bounded artifact/gate check rejects each; valid design shape alone does not mark behavior evidence passed.",
+      "target": "check_slice.py"
+    },
+    {
+      "id": "AC-013",
+      "when": "Run execute through the real AWT EventQueue behind a latch; exercise Stop-before-runnable and admission-before-Stop orderings separately.",
+      "then": "The first ordering invokes no callback; the second ordering records an executing callback and Stop returns without waiting; the owner cannot start another run until settlement.",
+      "target": "lifecycle-admission-awt-smoke"
+    }
+  ],
+  "type_safety_audit": [
+    {
+      "requirement": "LC-001",
+      "invalid": "Idle plus an active run, or two active runs",
+      "type_api_prevention": "Final RunLifecycle owner with private state and distinct final RunHandle; no public active-state constructor",
+      "residual_runtime_obligation": "Synchronized startRun and owner-key identity checks serialize competing starts and reject foreign handles",
+      "justification": "Java aliases do not enforce single ownership; no per-state wrapper is allowed to become stale authority"
+    },
+    {
+      "requirement": "LC-002",
+      "invalid": "Empty/duplicate/null/mutated call list",
+      "type_api_prevention": "CallId and private CallBatch factory; List.copyOf plus nonempty/distinct validation",
+      "residual_runtime_obligation": "Constructor validation of externally supplied values",
+      "justification": "Java has no built-in nonempty/unique list type; one domain wrapper is simpler than pervasive checks"
+    },
+    {
+      "requirement": "LC-003",
+      "invalid": "Execute wrong call or two effects",
+      "type_api_prevention": "Private BatchState cursor/status map and no public completion mutator",
+      "residual_runtime_obligation": "Cursor/admission checked under monitor on every attempt",
+      "justification": "Sequential ordering involves changing shared state, not just a parameter type"
+    },
+    {
+      "requirement": "LC-004",
+      "invalid": "Scheduled token grants effect after Stop",
+      "type_api_prevention": "No public admission token; execute owns admission and immediate callback invocation",
+      "residual_runtime_obligation": "Stop and execute share one monitor and linearization point",
+      "justification": "No affine references or atomic world transition in Java; tests cover both race orderings"
+    },
+    {
+      "requirement": "LC-005",
+      "invalid": "Stopping admits work or falsely claims rollback",
+      "type_api_prevention": "Stopping owns run state; finish returns Unsettled while work remains",
+      "residual_runtime_obligation": "Driver invokes finish only after its own resources settle; this component accounts effects only",
+      "justification": "Type state cannot force an external platform operation to terminate"
+    },
+    {
+      "requirement": "LC-006",
+      "invalid": "Duplicate completion or contradictory outcome flags",
+      "type_api_prevention": "Value-free Effect; one terminal CallStatus; Executed and Rejected are disjoint closed variants; no public complete operation",
+      "residual_runtime_obligation": "Normal return records COMPLETED; RuntimeException/Error records FAILED_AFTER_START and rethrows the same object; current executing identity is checked and terminal recording occurs once",
+      "justification": "An effect failure is temporal/external and must be observed"
+    },
+    {
+      "requirement": "LC-007",
+      "invalid": "CallId/RunHandle/BatchHandle mixup or forged public capability",
+      "type_api_prevention": "Distinct final handle types with package-private construction; LifecycleSnapshot and ordered BatchSnapshot contain no handles",
+      "residual_runtime_obligation": "Private owner-key identity and current-handle checks reject foreign/replaced handles; captured snapshots are inert values",
+      "justification": "Package-local construction alone cannot prove ownership or freshness"
+    },
+    {
+      "requirement": "LC-008",
+      "invalid": "Closed with new admission or lost executing work",
+      "type_api_prevention": "LifecyclePhase distinguishes STOPPING/CLOSING/CLOSED; close has no reopen transition",
+      "residual_runtime_obligation": "close cancels pending work; finish settles Closing",
+      "justification": "External running effect can outlive content; no unconditional liveness claim"
+    },
+    {
+      "requirement": "LC-009",
+      "invalid": "Generic JSON/PSI/null/protocol flags in core",
+      "type_api_prevention": "Value-free Effect, non-generic closed result algebras, ordered handle-free snapshots, no forbidden type imports, null-check constructors",
+      "residual_runtime_obligation": "Null-check every public argument before state mutation; inspect public signatures/dependencies; no static whole-program nullness claim",
+      "justification": "No JSpecify/NullAway requested; Java nullable references remain a stated limitation"
+    },
+    {
+      "requirement": "LC-010",
+      "invalid": "Caller mutates internal state or Stop waits on arbitrary callback",
+      "type_api_prevention": "Immutable ordered snapshots; owner state, map and capability handles never exposed",
+      "residual_runtime_obligation": "Release monitor before callback; capture snapshot under monitor",
+      "justification": "Types do not prove lock duration or scheduling"
+    },
+    {
+      "requirement": "LC-011",
+      "invalid": "Call IDs collide across accepted batches",
+      "type_api_prevention": "CallBatch validates local uniqueness; run-private accepted ID set and atomic batch installation",
+      "residual_runtime_obligation": "Reject reuse before admitting batch; finish requires settled state",
+      "justification": "Identity uniqueness is relative to accumulated history"
+    },
+    {
+      "requirement": "LC-012",
+      "invalid": "Green stage without concrete evidence or type audit",
+      "type_api_prevention": "Fixed requirement/audit/evidence/stage records and exact receipt identity fields",
+      "residual_runtime_obligation": "Check referential coverage and hashes; reviewer judges prevention adequacy",
+      "justification": "Structural checks cannot prove arbitrary semantic enforcement"
+    }
+  ],
+  "audit_dimensions": [
+    "sum_types",
+    "state_payloads",
+    "validated_values",
+    "constructor_authority",
+    "transitions",
+    "argument_result_correlation",
+    "collection_invariants",
+    "aliasing_ownership",
+    "protocol_progression",
+    "visibility",
+    "nullness"
+  ],
+  "non_goals": [
+    "Provider/stream/history assembly and wire validation",
+    "Actual PSI mutation algorithms, handles, rename and undo",
+    "Tool-window registration or UI callback delivery",
+    "Coroutine driver/service ownership implementation",
+    "Generic workflow/packet/graph infrastructure",
+    "Donor deletion or dependency migration",
+    "Unconditional termination of arbitrary callbacks"
+  ],
+  "assumptions": [
+    "Caller constructs one lifecycle owner per native session; project service uniqueness is a later integration obligation.",
+    "Effect callbacks are synchronous; no work is queued or suspended after admission before the callback boundary.",
+    "The driver calls finishRun only after other owned resources settle. This component cannot discover detached work.",
+    "External callbacks eventually return if eventual settlement is claimed. Safety is required even when they do not."
+  ],
+  "evidence": [
+    {
+      "id": "EV-SOURCE",
+      "kind": "source",
+      "description": "Current source-manifest hashes, branch identity, and cited donor/Pi ranges; reissued whenever source basis changes."
+    },
+    {
+      "id": "EV-STRUCTURE",
+      "kind": "command",
+      "description": "Strict parse plus identity/reference/audit/matrix/null-boundary/stage-binding checks; expected invalid-copy rejection."
+    },
+    {
+      "id": "EV-DESIGN-COMPILE",
+      "kind": "command",
+      "description": "Successful javac --release 21 compilation of source-backed declarations under plugin-core/src/main/java/.../nativeagent/lifecycle/; command output and classpath identity retained."
+    },
+    {
+      "id": "EV-REVIEW",
+      "kind": "review",
+      "description": "Fresh exact-basis review by openai-codex/gpt-5.6-sol:medium with all findings dispositioned and targeted final gate passed."
+    },
+    {
+      "id": "EV-VCS",
+      "kind": "tool",
+      "description": "Current branch native-agent-workflow, authorized IDE VCS capability and nonoverlapping diff"
+    },
+    {
+      "id": "EV-FOCUSED",
+      "kind": "command",
+      "description": "Exact RunLifecycleTest test methods named by AC-001 through AC-011"
+    },
+    {
+      "id": "EV-SMOKE",
+      "kind": "command",
+      "description": "Real AWT EventQueue scenario; callback loses/wins Stop; no model/provider claim"
+    },
+    {
+      "id": "EV-BUILD",
+      "kind": "tool",
+      "description": "IDE build_project success on changed production basis"
+    },
+    {
+      "id": "EV-SURFACE",
+      "kind": "tool",
+      "description": "Semantic API/allowed-file inspection and no forbidden core dependencies"
+    },
+    {
+      "id": "EV-DESIGN-SOURCE",
+      "kind": "source",
+      "description": "Hashes and extracted public/package-visible signatures for all source-backed lifecycle declarations."
+    },
+    {
+      "id": "EV-RECEIPT",
+      "kind": "command",
+      "description": "Exact-basis receipt identity check rejects altered spec, design, declaration/source, configuration or evidence result hashes."
+    }
+  ],
+  "stages": [
+    {
+      "id": "S1",
+      "entry": [
+        {
+          "requirements": [
+            "LC-012"
+          ],
+          "evidence": [
+            "EV-SOURCE"
+          ]
+        }
+      ],
+      "exit": [
+        {
+          "requirements": [
+            "LC-001",
+            "LC-002",
+            "LC-003",
+            "LC-004",
+            "LC-005",
+            "LC-006",
+            "LC-007",
+            "LC-008",
+            "LC-009",
+            "LC-010",
+            "LC-011",
+            "LC-012"
+          ],
+          "evidence": [
+            "EV-STRUCTURE",
+            "EV-DESIGN-SOURCE",
+            "EV-DESIGN-COMPILE",
+            "EV-RECEIPT"
+          ]
+        }
+      ],
+      "outcome": "Normalized type-audited design; no implementation claim"
+    },
+    {
+      "id": "S2",
+      "depends_on": [
+        "S1"
+      ],
+      "entry": [
+        {
+          "requirements": [
+            "LC-012"
+          ],
+          "evidence": [
+            "EV-STRUCTURE",
+            "EV-DESIGN-SOURCE",
+            "EV-DESIGN-COMPILE",
+            "EV-RECEIPT"
+          ]
+        }
+      ],
+      "exit": [
+        {
+          "requirements": [
+            "LC-001",
+            "LC-002",
+            "LC-003",
+            "LC-004",
+            "LC-005",
+            "LC-006",
+            "LC-007",
+            "LC-008",
+            "LC-009",
+            "LC-010",
+            "LC-011",
+            "LC-012"
+          ],
+          "evidence": [
+            "EV-REVIEW",
+            "EV-STRUCTURE",
+            "EV-DESIGN-SOURCE",
+            "EV-DESIGN-COMPILE",
+            "EV-RECEIPT"
+          ]
+        }
+      ],
+      "outcome": "Independent final gate passes on exact frozen basis"
+    },
+    {
+      "id": "S3",
+      "depends_on": [
+        "S2"
+      ],
+      "entry": [
+        {
+          "requirements": [
+            "LC-012"
+          ],
+          "evidence": [
+            "EV-REVIEW",
+            "EV-STRUCTURE",
+            "EV-DESIGN-SOURCE",
+            "EV-DESIGN-COMPILE",
+            "EV-RECEIPT",
+            "EV-VCS",
+            "EV-SOURCE"
+          ]
+        }
+      ],
+      "exit": [
+        {
+          "requirements": [
+            "LC-001",
+            "LC-002",
+            "LC-003",
+            "LC-004",
+            "LC-005",
+            "LC-006",
+            "LC-007",
+            "LC-008",
+            "LC-009",
+            "LC-010",
+            "LC-011"
+          ],
+          "evidence": [
+            "EV-FOCUSED",
+            "EV-SMOKE",
+            "EV-BUILD",
+            "EV-SURFACE",
+            "EV-RECEIPT"
+          ]
+        },
+        {
+          "requirements": [
+            "LC-012"
+          ],
+          "evidence": [
+            "EV-STRUCTURE",
+            "EV-REVIEW",
+            "EV-VCS",
+            "EV-RECEIPT"
+          ]
+        }
+      ],
+      "outcome": "Implemented/verified component; commit only via authorized IDE VCS"
+    }
+  ],
+  "open_decisions": [],
+  "operation_matrix": [
+    {
+      "operation": "startRun",
+      "phase": "IDLE",
+      "result": "Started",
+      "next_phase": "RUNNING"
+    },
+    {
+      "operation": "startRun",
+      "phase": "RUNNING|STOPPING",
+      "result": "Rejected(BUSY)",
+      "next_phase": "unchanged"
+    },
+    {
+      "operation": "startRun",
+      "phase": "CLOSING|CLOSED",
+      "result": "Rejected(CLOSED)",
+      "next_phase": "unchanged"
+    },
+    {
+      "operation": "beginBatch",
+      "phase": "RUNNING",
+      "precondition": "current run; no unsettled batch; no CallId already accepted",
+      "result": "Begun",
+      "next_phase": "RUNNING with new current batch"
+    },
+    {
+      "operation": "beginBatch",
+      "phase": "RUNNING",
+      "precondition": "any rejected precondition",
+      "result": "Rejected(exact matching reason)",
+      "next_phase": "unchanged"
+    },
+    {
+      "operation": "beginBatch",
+      "phase": "STOPPING|CLOSING",
+      "result": "Rejected(RUN_NOT_ACCEPTING_BATCHES)",
+      "next_phase": "unchanged"
+    },
+    {
+      "operation": "beginBatch",
+      "phase": "IDLE|CLOSED or foreign/old run",
+      "result": "Rejected(STALE_RUN)",
+      "next_phase": "unchanged"
+    },
+    {
+      "operation": "execute",
+      "phase": "RUNNING",
+      "precondition": "current batch; next pending call",
+      "result": "Executed or thrown callback; terminal status recorded",
+      "next_phase": "RUNNING or Stop/close phase set concurrently"
+    },
+    {
+      "operation": "execute",
+      "phase": "RUNNING",
+      "precondition": "foreign/replaced batch",
+      "result": "Rejected(STALE_BATCH)",
+      "next_phase": "unchanged"
+    },
+    {
+      "operation": "execute",
+      "phase": "RUNNING",
+      "precondition": "unknown/already executing/already terminal/out of order call",
+      "result": "Rejected(exact matching reason)",
+      "next_phase": "unchanged"
+    },
+    {
+      "operation": "execute",
+      "phase": "STOPPING|CLOSING|CLOSED",
+      "result": "Rejected(RUN_NOT_ACCEPTING_EFFECTS) after current-batch identity check",
+      "next_phase": "unchanged"
+    },
+    {
+      "operation": "stop",
+      "phase": "RUNNING",
+      "result": "Acknowledged; transition STOPPING and cancel pending",
+      "next_phase": "STOPPING"
+    },
+    {
+      "operation": "stop",
+      "phase": "STOPPING|CLOSING",
+      "result": "Idempotent Acknowledged",
+      "next_phase": "unchanged"
+    },
+    {
+      "operation": "stop",
+      "phase": "IDLE|CLOSED or foreign/old run",
+      "result": "Rejected(STALE_RUN)",
+      "next_phase": "unchanged"
+    },
+    {
+      "operation": "finishRun",
+      "phase": "RUNNING|STOPPING",
+      "precondition": "no current batch or current batch settled",
+      "result": "Finished",
+      "next_phase": "IDLE"
+    },
+    {
+      "operation": "finishRun",
+      "phase": "CLOSING",
+      "precondition": "no current batch or current batch settled",
+      "result": "Finished",
+      "next_phase": "CLOSED"
+    },
+    {
+      "operation": "finishRun",
+      "phase": "RUNNING|STOPPING|CLOSING",
+      "precondition": "current batch unsettled",
+      "result": "Rejected(BATCH_UNSETTLED)",
+      "next_phase": "unchanged"
+    },
+    {
+      "operation": "finishRun",
+      "phase": "IDLE|CLOSED or foreign/old run",
+      "result": "Rejected(STALE_RUN)",
+      "next_phase": "unchanged"
+    },
+    {
+      "operation": "close",
+      "phase": "IDLE",
+      "result": "Closed snapshot",
+      "next_phase": "CLOSED"
+    },
+    {
+      "operation": "close",
+      "phase": "RUNNING|STOPPING",
+      "result": "Closing snapshot and cancel pending",
+      "next_phase": "CLOSING"
+    },
+    {
+      "operation": "close",
+      "phase": "CLOSING|CLOSED",
+      "result": "Idempotent snapshot",
+      "next_phase": "unchanged"
+    },
+    {
+      "operation": "batchSnapshot",
+      "phase": "any",
+      "precondition": "current batch handle",
+      "result": "Available(immutable ordered snapshot)",
+      "next_phase": "unchanged"
+    },
+    {
+      "operation": "batchSnapshot",
+      "phase": "any",
+      "precondition": "foreign/replaced/old batch handle",
+      "result": "Rejected(STALE_BATCH)",
+      "next_phase": "unchanged"
+    }
+  ],
+  "receipt_identity": {
+    "fields": [
+      "stage",
+      "feature",
+      "spec_hash",
+      "design_hash",
+      "declaration_hashes",
+      "configuration_identity",
+      "evidence_hashes",
+      "status"
+    ],
+    "volatile_fields_excluded_from_digest": [
+      "timestamp"
+    ]
+  },
+  "null_boundary_matrix": [
+    {
+      "operation": "CallId(String)",
+      "null_input": "value",
+      "expected": "NullPointerException; no owner state exists"
+    },
+    {
+      "operation": "CallBatch.of(List<CallId>)",
+      "null_input": "list or element",
+      "expected": "NullPointerException before CallBatch exists"
+    },
+    {
+      "operation": "beginBatch(RunHandle, CallBatch)",
+      "null_input": "run or batch",
+      "expected": "NullPointerException; lifecycle snapshot unchanged"
+    },
+    {
+      "operation": "execute(BatchHandle, CallId, Effect)",
+      "null_input": "batch, call or effect",
+      "expected": "NullPointerException; lifecycle/batch snapshot unchanged"
+    },
+    {
+      "operation": "stop(RunHandle)",
+      "null_input": "run",
+      "expected": "NullPointerException; lifecycle snapshot unchanged"
+    },
+    {
+      "operation": "finishRun(RunHandle)",
+      "null_input": "run",
+      "expected": "NullPointerException; lifecycle snapshot unchanged"
+    },
+    {
+      "operation": "batchSnapshot(BatchHandle)",
+      "null_input": "handle",
+      "expected": "NullPointerException; lifecycle/batch snapshot unchanged"
+    }
+  ]
+}

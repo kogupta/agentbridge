@@ -79,8 +79,6 @@ public final class RunLifecycle {
         if (phase == Lifecycle.Phase.RUNNING) {
             phase = Lifecycle.Phase.STOPPING;
             cancelPending();
-        } else if (phase != Lifecycle.Phase.STOPPING && phase != Lifecycle.Phase.CLOSING) {
-            return new StopResult.Rejected(StopRejection.RUN_NOT_ACTIVE);
         }
         return new StopResult.Acknowledged(snapshot(), currentBatchObservation());
     }
@@ -192,7 +190,7 @@ public final class RunLifecycle {
     public enum StartRejection { BUSY, CLOSED }
     public enum BatchRejection { STALE_RUN, RUN_NOT_ACCEPTING_BATCHES, PREVIOUS_BATCH_UNSETTLED, CALL_ID_ALREADY_ACCEPTED }
     public enum ExecutionRejection { STALE_BATCH, RUN_NOT_ACCEPTING_EFFECTS, UNKNOWN_CALL, ALREADY_EXECUTING, ALREADY_TERMINAL, OUT_OF_ORDER }
-    public enum StopRejection { STALE_RUN, RUN_NOT_ACTIVE }
+    public enum StopRejection { STALE_RUN }
     public enum FinishRejection { STALE_RUN, BATCH_UNSETTLED }
     public enum BatchSnapshotRejection { STALE_BATCH }
 

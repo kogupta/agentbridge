@@ -1,0 +1,15 @@
+{
+  "plugin-core/src/main/java/com/github/catatafishen/agentbridge/psi/PsiBridgeService.java": "1456bfac4f9ebfc60b97923307eb297aad27ebc2484c8cd7b24d62cd6bdb8e8d",
+  "plugin-core/src/main/java/com/github/catatafishen/agentbridge/psi/tools/Tool.java": "8513836e25f2f046280b9b731f48e54a8418fbe04c6e328e7e5544272ee13e5e",
+  "plugin-core/src/main/java/com/github/catatafishen/agentbridge/psi/tools/editing/EditingTool.java": "978eb07e61eb16d7463fb20fb30a3e78b24359c117f03f9a24726b73c22c8811",
+  "plugin-core/src/main/java/com/github/catatafishen/agentbridge/psi/tools/editing/ReplaceSymbolBodyTool.java": "e0ded5440de616ae80e3a347d091bb622fed18324472ac023a73010a4850a95d",
+  "plugin-core/src/main/java/com/github/catatafishen/agentbridge/psi/tools/refactoring/RefactorTool.java": "9c2616524a00f59b758470c3ec7e79bbc7ead5aff57bdb002511411098149fe6",
+  "plugin-core/src/main/java/com/github/catatafishen/agentbridge/psi/tools/RunPanelExecutor.java": "a3e1947c3c9bc1187ddcc565551c8d01d6b0fb94c7d7a0f53e73a187e7846f71",
+  "/home/muku/depot/personal/cli-tools/pi/packages/agent/src/agent-loop.ts": "1e16404a231912fbd7643d8317b15ec4cc6245ed8cedc37582a31d430a1cc6ac",
+  "/home/muku/depot/personal/cli-tools/pi/packages/ai/src/api/openai-codex-responses.ts": "3e64b9ddb86b5c0ca82f1357158026d5202f60ff3afab6a8778498a27b4227b7",
+  "/home/muku/depot/personal/cli-tools/pi/packages/ai/src/api/openai-responses-shared.ts": "2562ad7497bfe9cf71533b7584400751746b6a563229a615f6e23848780d2bee",
+  "/home/muku/depot/personal/cli-tools/pi/packages/ai/src/auth/oauth/openai-codex.ts": "757c6cff2bc67d89df30ad175eead549519e1d3756397b5b4189460ac9dbcaba",
+  "/home/muku/depot/personal/cli-tools/pi/packages/ai/test/openai-codex-stream.test.ts": "1e5f2bea491e116d0d05a6e63cdcf60298fd98ab94628cf18a5123bfdb327d7c",
+  "/home/muku/depot/personal/cli-tools/pi/packages/coding-agent/src/core/system-prompt.ts": "c660d28416c4674ba65fb0357d74462749b0741e72a2b15865573198f6b21519",
+  "/home/muku/depot/personal/cli-tools/pi/LICENSE": "0457f5bcec3b3b211605dfb5d1a49042fd638f3686a410fe099c24a25af13c48"
+}
