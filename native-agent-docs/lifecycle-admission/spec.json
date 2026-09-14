@@ -292,7 +292,8 @@
     "Caller constructs one lifecycle owner per native session; project service uniqueness is a later integration obligation.",
     "Effect callbacks are synchronous; no work is queued or suspended after admission before the callback boundary.",
     "The driver calls finishRun only after other owned resources settle. This component cannot discover detached work.",
-    "External callbacks eventually return if eventual settlement is claimed. Safety is required even when they do not."
+    "External callbacks eventually return if eventual settlement is claimed. Safety is required even when they do not.",
+    "After an effect records FAILED_AFTER_START, the driver records that call's result, starts no later call and makes no further provider request; it calls stop(run) to cancel remaining calls and finishRun after cleanup (product.md Run behavior, 'Tool failure after side effect'). Expected tool failures are returned values, not throwables."
   ],
   "evidence": [
     {
