@@ -6,15 +6,19 @@ Standard library only. Development tooling; not shipped in the plugin.
   check                   strict parse + reference/coverage rules on spec.json          (EV-STRUCTURE)
   receipt [--out PATH]    check, javac --release 21, javap signatures, hashed receipt   (EV-DESIGN-COMPILE,
                                                                                          EV-DESIGN-SOURCE, EV-RECEIPT)
-  verify --receipt PATH   recompute the receipt and reject any changed identity field   (EV-RECEIPT)
-  selftest                prove check/verify reject a removed audit row and altered hashes (AC-012)
+  verify --receipt PATH   authenticate stored evidence, recompute the receipt, reject drift (EV-RECEIPT)
+  selftest                prove check/verify reject broken specs, altered hashes and forged receipts (AC-012)
+
+Temporary files live under .agent-work/native-agent-spec/.
 
 Exit codes: 0 success, 1 findings or mismatch, 2 tool/environment failure.
 """
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
+import io
 import json
 import math
 import re
@@ -37,6 +41,8 @@ CONFIG_FILES = [
     "gradle.properties",
     "gradle/wrapper/gradle-wrapper.properties",
 ]
+WORK_PARENT = REPO_ROOT / ".agent-work" / "native-agent-spec"
+SCRATCH_ROOTS_SEEN: list[str] = []
 DEFAULT_RECEIPT = ".agent-work/native-agent-docs/lifecycle-admission/s1-receipt.json"
 STAGE = "S1"
 RECEIPT_IDENTITY = ["stage", "feature", "spec_hash", "design_hash", "declaration_hashes",
@@ -49,8 +55,33 @@ REQUIRED_TOP = {
 }
 
 
+RECORD_FIELDS = {  # kind: (required, optional)
+    "requirements": ({"id", "statement", "acceptance"}, set()),
+    "acceptance": ({"id", "when", "then", "target"}, set()),
+    "type_safety_audit": ({"requirement", "invalid", "type_api_prevention", "residual_runtime_obligation",
+                           "justification"}, set()),
+    "evidence": ({"id", "kind", "description"}, set()),
+    "stages": ({"id", "entry", "exit", "outcome"}, {"depends_on"}),
+    "operation_matrix": ({"operation", "phase", "result", "next_phase"}, {"precondition"}),
+    "null_boundary_matrix": ({"operation", "null_input", "expected"}, set()),
+}
+STAGE_BINDING_FIELDS = {"requirements", "evidence"}
+RECEIPT_IDENTITY_FIELDS = {"fields", "volatile_fields_excluded_from_digest"}
+EVIDENCE_KINDS = {"source", "command", "review", "tool"}
+RECEIPT_EVIDENCE = ("EV-STRUCTURE", "EV-DESIGN-COMPILE", "EV-DESIGN-SOURCE")
+TEST_METHOD = re.compile(r"@Test\b(?:\s*@\w+(?:\([^)]*\))?)*\s*(?:public\s+|protected\s+)?void\s+(\w+)\s*\(")
+
+
 class ToolError(Exception):
     pass
+
+
+def scratch_dir() -> tempfile.TemporaryDirectory:
+    """Temporary directory under .agent-work/, never the system temp location."""
+    WORK_PARENT.mkdir(parents=True, exist_ok=True)
+    directory = tempfile.TemporaryDirectory(dir=WORK_PARENT)
+    SCRATCH_ROOTS_SEEN.append(directory.name)
+    return directory
 
 
 # ---------------------------------------------------------------- strict parsing
@@ -98,6 +129,40 @@ def check_spec(root: Path) -> list[dict]:
     if spec["format_version"] != 1:
         fail("S003", "/format_version", "unsupported format version")
 
+    def fields(record, pointer, required, optional):
+        if not isinstance(record, dict):
+            fail("S003", pointer, "record is not an object")
+            return False
+        for key in sorted(required - set(record)):
+            fail("S003", f"{pointer}/{key}", "missing required field")
+        for key in sorted(set(record) - required - optional):
+            fail("S005", f"{pointer}/{key}", "unknown field")
+        return True
+
+    for section, (required, optional) in RECORD_FIELDS.items():
+        for index, record in enumerate(spec[section]):
+            fields(record, f"/{section}/{index}", required, optional)
+    for index, stage in enumerate(spec["stages"]):
+        for gate in ("entry", "exit"):
+            bindings = stage.get(gate) if isinstance(stage, dict) else None
+            if not isinstance(bindings, list):
+                continue
+            for binding_index, binding in enumerate(bindings):
+                fields(binding, f"/stages/{index}/{gate}/{binding_index}", STAGE_BINDING_FIELDS, set())
+    fields(spec["receipt_identity"], "/receipt_identity", RECEIPT_IDENTITY_FIELDS, set())
+    for key, value in spec["decisions"].items():
+        if not isinstance(value, str) or not value.strip():
+            fail("S003", f"/decisions/{key}", "decision value must be a nonempty string")
+    for section in ("audit_dimensions", "non_goals", "assumptions"):
+        for index, value in enumerate(spec[section]):
+            if not isinstance(value, str) or not value.strip():
+                fail("S003", f"/{section}/{index}", "entry must be a nonempty string")
+    for index, record in enumerate(spec["evidence"]):
+        if isinstance(record, dict) and record.get("kind") not in EVIDENCE_KINDS:
+            fail("S003", f"/evidence/{index}/kind", f"kind must be one of {sorted(EVIDENCE_KINDS)}")
+    if any(f["rule"] == "S003" and f["message"] == "record is not an object" for f in findings):
+        return findings
+
     def ids(section):
         seen = set()
         for index, item in enumerate(spec[section]):
@@ -135,7 +200,7 @@ def check_spec(root: Path) -> list[dict]:
 
     test_methods = set()
     for test_file in sorted((root / TEST_DIR).glob("*.java")):
-        for method in re.findall(r"void\s+(\w+)\s*\(", test_file.read_text(encoding="utf-8")):
+        for method in TEST_METHOD.findall(test_file.read_text(encoding="utf-8")):
             test_methods.add(f"{test_file.stem}#{method}")
     for index, acceptance in enumerate(spec["acceptance"]):
         for field in ("when", "then", "target"):
@@ -248,7 +313,7 @@ def build_receipt(root: Path) -> dict:
     if not sources:
         raise ToolError(f"no sources under {SOURCE_DIR}")
     javac_version = run_tool(["javac", "-version"])
-    with tempfile.TemporaryDirectory() as classes:
+    with scratch_dir() as classes:
         compile_command = ["javac", "--release", "21", "-d", classes] + [str(path) for path in sources]
         compiled = run_tool(compile_command)
         compile_result = {
@@ -298,13 +363,32 @@ def canonical(value) -> bytes:
 
 
 def verify_receipt(root: Path, receipt_path: Path) -> list[dict]:
-    stored = load_strict(receipt_path)
+    try:
+        stored = load_strict(receipt_path)
+    except (OSError, ValueError) as error:
+        raise ToolError(f"cannot read receipt {receipt_path}: {error}") from error
+    if not isinstance(stored, dict):
+        raise ToolError(f"receipt {receipt_path} is not a JSON object")
     mismatches = []
-    missing = [field for field in RECEIPT_IDENTITY + ["digest"] if field not in stored]
+    missing = [field for field in RECEIPT_IDENTITY + ["digest", "evidence"] if field not in stored]
     if missing:
         return [{"field": field, "message": "missing from receipt"} for field in missing]
     if stored["digest"] != sha256_bytes(canonical({field: stored[field] for field in RECEIPT_IDENTITY})):
         mismatches.append({"field": "digest", "message": "receipt content does not match its digest"})
+
+    evidence, hashes = stored["evidence"], stored["evidence_hashes"]
+    if not isinstance(evidence, dict) or set(evidence) != set(RECEIPT_EVIDENCE):
+        mismatches.append({"field": "evidence", "message": f"evidence items must be exactly {list(RECEIPT_EVIDENCE)}",
+                           "diff": sorted(evidence) if isinstance(evidence, dict) else type(evidence).__name__})
+    elif not isinstance(hashes, dict) or set(hashes) != set(RECEIPT_EVIDENCE):
+        mismatches.append({"field": "evidence", "message": "evidence_hashes keys do not match evidence items"})
+    else:
+        for key in RECEIPT_EVIDENCE:
+            if sha256_bytes(canonical(evidence[key])) != hashes[key]:
+                mismatches.append({"field": "evidence", "message": f"{key} payload does not match its hash"})
+        statuses = [item.get("status") if isinstance(item, dict) else None for item in evidence.values()]
+        if (stored["status"] == "PASS") != all(status == "PASS" for status in statuses):
+            mismatches.append({"field": "evidence", "message": "receipt status disagrees with evidence statuses"})
     current = build_receipt(root)
     for field in RECEIPT_IDENTITY:
         if stored[field] != current[field]:
@@ -339,7 +423,7 @@ def selftest(root: Path) -> list[dict]:
     def record(name, passed, detail):
         cases.append({"case": name, "status": "PASS" if passed else "FAIL", "detail": detail})
 
-    with tempfile.TemporaryDirectory() as scratch:
+    with scratch_dir() as scratch:
         copy = Path(scratch)
         copy_basis(root, copy)
 
@@ -382,6 +466,64 @@ def selftest(root: Path) -> list[dict]:
         record("valid design shape alone does not mark behavior evidence passed",
                not {"EV-FOCUSED", "EV-SMOKE", "EV-BUILD"} & set(receipt["evidence_hashes"]),
                sorted(receipt["evidence_hashes"]))
+
+        def rejected_receipt(name, mutate, field):
+            forged = json.loads(json.dumps(receipt))
+            mutate(forged)
+            receipt_path.write_text(json.dumps(forged, indent=2) + "\n", encoding="utf-8")
+            result = verify_receipt(copy, receipt_path)
+            record(name, any(m["field"] == field for m in result), result)
+
+        def forge_compile(forged):
+            forged["evidence"]["EV-DESIGN-COMPILE"]["status"] = "FAIL"
+            forged["evidence"]["EV-DESIGN-COMPILE"]["output"] = "forged output"
+
+        rejected_receipt("forged evidence payload is rejected", forge_compile, "evidence")
+        rejected_receipt("missing evidence item is rejected",
+                         lambda forged: forged["evidence"].pop("EV-DESIGN-SOURCE"), "evidence")
+        rejected_receipt("extra evidence item is rejected",
+                         lambda forged: forged["evidence"].update({"EV-BUILD": {"status": "PASS"}}), "evidence")
+
+        def forge_hash(forged):
+            forged["evidence_hashes"]["EV-STRUCTURE"] = "0" * 64
+            forged["digest"] = sha256_bytes(canonical({field: forged[field] for field in RECEIPT_IDENTITY}))
+
+        rejected_receipt("mismatched evidence hash is rejected", forge_hash, "evidence")
+
+        def rejected_spec(name, mutate, rule):
+            spec_copy = load_strict(root / SPEC)
+            mutate(spec_copy)
+            (copy / SPEC).write_text(json.dumps(spec_copy, indent=2) + "\n", encoding="utf-8")
+            result = check_spec(copy)
+            record(name, any(f["rule"] == rule for f in result), result)
+            shutil.copy2(root / SPEC, copy / SPEC)
+
+        rejected_spec("unknown field in a requirement is rejected",
+                      lambda spec: spec["requirements"][0].update({"unknown_typo_field": True}), "S005")
+        rejected_spec("unknown field in a stage binding is rejected",
+                      lambda spec: spec["stages"][0]["exit"][0].update({"unknown_typo_field": True}), "S005")
+        rejected_spec("missing required row field is rejected",
+                      lambda spec: spec["acceptance"][0].pop("then"), "S003")
+        rejected_spec("helper method is not an acceptance test target",
+                      lambda spec: spec["acceptance"][0].update({"target": "RunLifecycleTest#await"}), "T002")
+
+        record("scratch roots stay under .agent-work",
+               all(Path(p).resolve().is_relative_to(WORK_PARENT.resolve()) for p in (scratch, *SCRATCH_ROOTS_SEEN)),
+               [scratch, *SCRATCH_ROOTS_SEEN])
+
+        for name, receipt_file in (("missing receipt file", copy / "absent.json"),
+                                   ("malformed receipt file", copy / "malformed.json")):
+            if receipt_file.name == "malformed.json":
+                receipt_file.write_text("{not json", encoding="utf-8")
+            out, err = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                code = main(["--root", str(copy), "verify", "--receipt", str(receipt_file)])
+            try:
+                status = json.loads(err.getvalue() or out.getvalue()).get("status")
+            except ValueError:
+                status = None
+            record(f"{name} is a JSON tool error with exit 2", code == 2 and status == "ERROR",
+                   {"exit": code, "stdout": out.getvalue(), "stderr": err.getvalue()})
     return cases
 
 
@@ -423,7 +565,7 @@ def main(argv: list[str]) -> int:
         print(json.dumps({"status": "PASS" if all(c["status"] == "PASS" for c in cases) else "FAIL",
                           "cases": [{k: c[k] for k in ("case", "status")} for c in cases]}, indent=2))
         return 0 if all(c["status"] == "PASS" for c in cases) else 1
-    except ToolError as error:
+    except (ToolError, OSError, ValueError) as error:
         print(json.dumps({"status": "ERROR", "message": str(error)}), file=sys.stderr)
         return 2
 
