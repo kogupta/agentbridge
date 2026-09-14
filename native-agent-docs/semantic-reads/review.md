@@ -4,15 +4,15 @@ Append-only. Review rounds are tied to exact content digests. Acceptance targets
 
 ## Current state
 
-- Workflow state: SPEC_INVALID; Round 2 review of revision 1 found 12 Majors; S1 structure check PASS
+- Workflow state: SPEC_DRAFT; Round 2 findings addressed in revision 2; S1 structure check PASS; fresh review not run
 - Latest round: 2
-- Spec digest: `4394865678ea7ebaf7be478eca3836e2b7c6829d41cb9a2bb0dbd88126db25d3`
+- Spec digest: `13183292b057ec708e01744089e3b3e82455cfc77112b3e5e54d82bad5687586`
 - Product digest at spec basis: `3ca1c39fe951862e79371b80581bb929df246430dc524ce0015d93e9e6f2624a`
-- Open Blockers: none
-- Open Majors: 12 (SR-R2-001 through SR-R2-012)
-- Open Minors: 11 (SR-R2-013 through SR-R2-023)
-- Reviewer selection: Round 2 ran in a fresh-context Claude Code session (Opus 5) from prompt `.agent-work/native-agent-docs/semantic-reads/spec-review-prompt-r2.md`, not in an external separate tool
-- Next permitted action: resolve owner decisions for the Round 2 Majors, revise, and obtain a fresh exact-digest review
+- Open Blockers: none recorded
+- Open Majors: none recorded; 12 Round 2 Majors addressed, not yet reviewed
+- Open Minors: none recorded; 11 Round 2 Minors addressed, not yet reviewed
+- Reviewer selection: external separate tool (prompt `.agent-work/native-agent-docs/semantic-reads/spec-review-prompt-r3.md`); the Round 2 reviewer session also authored revision 2 and is not eligible
+- Next permitted action: fresh independent specification review of the exact revision 2 digest (EV-SPEC-REVIEW)
 
 ## Round 0 — specification draft
 
@@ -118,3 +118,46 @@ Next permitted action at this basis: fresh exact-digest specification review.
 - **SR-R2-013 through SR-R2-023 — Minor, open.** Page-token mismatch step, signature edge cases, cancellation listener and throwable type, READ_FAILED categories, query validation, write-action restarts, weak oracles, missing matrix rows, audit wording, assumption 7, fallback hint and find_references target identity.
 
 Next permitted action at this basis: resolve owner decisions, revise, and obtain a fresh exact-digest review.
+
+## Revision 2 — address Round 2
+
+- Author: Claude Code session (Opus 5), the Round 2 reviewer session, run from the `address-plan-review-comments` skill; this revision is not a review receipt
+- Spec digest before: `4394865678ea7ebaf7be478eca3836e2b7c6829d41cb9a2bb0dbd88126db25d3`; after: `13183292b057ec708e01744089e3b3e82455cfc77112b3e5e54d82bad5687586`
+- Mechanical command: `python3 scripts/native-spec/check_slice.py check --spec native-agent-docs/semantic-reads/spec.json --planned-targets`; result PASS, zero findings
+- Owner decisions (2026-09-15), recorded in `spec.json` decisions: `page_token_reuse` replayable while live, new token per page; `page_staleness_precedence` count check before the index wait; `nested_type_members` members of local classes, anonymous classes and enum-constant bodies are not declarations; `libraries_symbols` attached library source declarations only; `search_restriction` restriction overrides scope and generated filtering, non-type owner returns NOT_A_TYPE; `admission_refusal` typed NotAdmitted result that the codec maps to NotStarted; `disposed_registry_issue` Effect throws, FAILED_AFTER_START; `restored_pointer_identity` kind, name or signature mismatch returns STALE_HANDLE; `write_action_restarts` unbounded until Stop; `cancellation_throwable` `java.util.concurrent.CancellationException`; `reference_target_identity` every page carries target identity and scope; `unsupported_language_hint` hint names read_file and search_text
+- Labeled normalizations without an owner question (review suggested resolutions): SR-001 query validation, SR-004 canonical root comparison, SR-009 reference range, line and kind, SR-010 document offsets and match column, SR-020 category rule, SR-025 signature rules, SR-012 entry kinds (assumption 10)
+- Scope and stage count unchanged; no global invariant changed
+
+### Dispositions
+
+- **SR-R2-001 — Addressed.** SR-019 adds the NotAdmitted result and the codec mapping; ADMISSION matrix row and assumption 3 corrected; AC-015 adds Limited and Rejected.
+- **SR-R2-002 — Addressed.** SR-012 adds the disposed issue result; SR-019, SR-023 and SR-026 step 1 make the Effect throw; matrix content-close row covers disposal; AC-012 and AC-015 extended.
+- **SR-R2-003 — Addressed.** SR-012 adds entry kinds and wrong-kind outcomes; audit row adds typed per-kind keys; AC-012 extended.
+- **SR-R2-004 — Addressed.** SR-017 makes tokens replayable with a new token per page; SR-024 exception added; matrix replay row added; AC-016 extended.
+- **SR-R2-005 — Addressed.** SR-017 and SR-026 step 3 check the count before the index wait; matrix row returns STALE_PAGE without waiting; AC-016 adds the dumb-mode case.
+- **SR-R2-006 — Addressed.** SR-006 excludes declarations inside local classes, anonymous classes and enum-constant bodies; SR-007 defines depth; AC-021 extended.
+- **SR-R2-007 — Addressed.** SR-006 makes restrictions override scope and generated filtering and adds NOT_A_TYPE; SR-026 step 7 and a matrix row added; AC-021 extended.
+- **SR-R2-008 — Addressed.** SR-009 defines range, line, excerpt anchor, kind and generated flag; audit row updated; AC-009 extended.
+- **SR-R2-009 — Addressed.** SR-010 uses document offsets and a match column and returns UNSUPPORTED_FILE for a too-large file scope; AC-010 extended.
+- **SR-R2-010 — Addressed.** SR-004 compares roots in canonical form and renders relative to the canonical base; AC-002 adds a symlinked base fixture.
+- **SR-R2-011 — Addressed.** AC-009 adds Base.m, an overload, a static import, a generated call and a non-Java reference; SR-009 adds overloads to strict search.
+- **SR-R2-012 — Addressed.** SR-006 and SR-009 state library source candidates and compiled-reference equivalence; new assumption on JavaSourceFilterScope; AC-025 added.
+- **SR-R2-013 — Addressed.** SR-026 step 3 includes operation and argument mismatch.
+- **SR-R2-014 — Addressed.** SR-025 defines parameter type text, array dimensions and compact constructors; implicit constructors excluded in SR-006; AC-021 declares two constructors.
+- **SR-R2-015 — Addressed.** SR-019 requires a nonblocking listener and names the thrown type; AC-015 asserts both.
+- **SR-R2-016 — Addressed.** SR-020 adds the category rule; AC-017 asserts three exact categories.
+- **SR-R2-017 — Addressed.** SR-001 lists text query arguments and find_file and name validation; SR-006 states name equality; AC-001 extended.
+- **SR-R2-018 — Addressed.** SR-016 states unbounded write-action restarts; matrix row added; assumption 5 extended.
+- **SR-R2-019 — Addressed.** AC-002, AC-004, AC-006 and AC-007 add the named oracles and outline paging; AC-011 targets SemanticReadIdeTest.
+- **SR-R2-020 — Addressed.** Matrix handle rows include search_symbols with an owner handle; get_file_outline INDEXING TOO_MANY_RESULTS row added.
+- **SR-R2-021 — Addressed.** Audit rows for SR-005, SR-009, SR-010, SR-011 and SR-014 corrected.
+- **SR-R2-022 — Addressed.** Assumption 7 corrected; SR-013 compares kind, name and signature; AC-013 adds a replacement case.
+- **SR-R2-023 — Addressed.** SR-009 carries target identity and scope; SR-020 adds the UNSUPPORTED_LANGUAGE fallback hint; AC-007 and AC-009 assert them.
+
+Address status: COMPLETE
+Plan status: READY_FOR_IMPLEMENTATION_REVIEW
+Final gate required: TARGETED_REVIEW
+Blocking findings remaining: 0
+Deferred findings: 0
+
+Next permitted action at this basis: fresh exact-digest specification review by a separate reviewer (`workflow.md` SPEC_VALID gate 5).
