@@ -4,13 +4,13 @@ Append-only. Rounds are in chronological order. Add a new round or a Resolution 
 
 ## Current state
 
-- Review status: REOPEN_FULL_REVIEW (round 3 addressed; the fix changed the LC-006 contract and one operation-matrix row, which invalidates the frozen basis)
-- Latest round: 3, addressed on 2026-09-14 (see "Round 3 — Resolution")
-- Open Blockers: 0 pending fresh review
-- Open Majors: 0 pending fresh review
-- Deferred Minors/Nits: 1 (N-003)
-- Frozen basis: INVALIDATED
-- Next permitted action: fresh independent review of the current basis. Regenerate and verify the S1 receipt first.
+- Review status: TARGETED_GATE requested (round 4 addressed; see "Round 4 — Resolution")
+- Latest round: 4 (openai-codex/gpt-5.6-sol), addressed on 2026-09-14
+- Open Blockers: 0 pending targeted gate
+- Open Majors: 0 pending targeted gate
+- Deferred Minors/Nits: 1 (round 3 N-003)
+- Frozen basis: CURRENT for rows outside the changed ones listed in the resolution
+- Next permitted action: TARGETED_GATE by a fresh reviewer. Regenerate and verify the S1 receipt first.
 
 ## Round 1
 
@@ -825,3 +825,84 @@ Verification: FAIL
 Review rounds: 4
 Stop reason: R4-B-001, R4-B-002, R4-M-001, R4-M-002 and R4-M-003 remain open
 Next permitted action: ADDRESS_FINDINGS
+
+## Round 4 — Resolution
+
+Appended after the round-4 findings. Round-4 text above is unchanged.
+
+Classification: R4-B-001 bounded defect (A); R4-B-002, R4-M-001, R4-M-003 bounded defects in the checker (A); R4-M-002 missing proof (B); R4-N-001 bounded defect (A). No finding required replanning (C). No architecture, stage boundary or LC behavior grammar changed. `product.md` stayed the authority; `design.md`, `Effect` Javadoc and one `spec.json` assumption were aligned to it. So the targeted gate applies, not a full reopen.
+
+- **R4-B-001 — Resolved (product authority kept).** The driver policy is now one rule in three places: after `FAILED_AFTER_START` the driver records that call's result, starts no later call, makes no further provider request, calls `stop(run)` so remaining calls are `CANCELLED_BEFORE_START`, then `finishRun(run)` after cleanup. This matches `product.md` Run behavior "Tool failure after side effect: No automatic continuation; user inspects". `design.md` Scope records it as a deliberate difference from Pi `agent-loop.ts:708-714`, and notes that expected tool failures are returned values, so only unexpected throwables reach `FAILED_AFTER_START`. `Effect` Javadoc states the same rule. `spec.json` `assumptions` gained the driver obligation. The round-3 M-002 resolution text ("converting them into tool error results and continuing … is the driver's job") is superseded by this entry. The lifecycle code needed no change: after a failed call, `stop` cancels the remaining calls, which `reentrantOperationsFromEffect` and `stopDuringEffect` already exercise.
+- **R4-B-002 — Resolved.** `verify_receipt` now requires `evidence` and `evidence_hashes` to hold exactly `EV-STRUCTURE`, `EV-DESIGN-COMPILE`, `EV-DESIGN-SOURCE`; recomputes each stored payload hash and rejects a mismatch; and rejects a receipt whose `status` disagrees with its evidence statuses. It checks these before comparing with the current basis. New selftests: forged compile status/output, missing evidence item, extra evidence item, and a mismatched evidence hash with a recomputed digest. Before the fix, the committed checker's `verify_receipt` returned `[]` for the forged payload (reproduced).
+- **R4-M-001 — Resolved.** `check` validates exact required/optional fields for requirements, acceptance, audit, evidence, stages, stage bindings, operation-matrix and null-boundary rows, and `receipt_identity`. Unknown nested fields are rule `S005`; missing fields are `S003`. Decision values, audit dimensions, non-goals and assumptions must be nonempty strings; evidence `kind` must be one of `source`, `command`, `review`, `tool`. Acceptance targets `Class#method` now resolve only to `@Test` methods. New selftests: unknown field in a requirement, unknown field in a stage binding, missing `then`, and `RunLifecycleTest#await` as a target. Before the fix, the committed checker returned no findings for both the nested unknown field and the helper-method target (reproduced).
+- **R4-M-002 — Resolved.** Added assertions:
+  - AC-013 `awtAdmissionSmoke`: before the admission-winning AWT callback is released, the call is `EXECUTING`, `startRun` is `BUSY` and `finishRun` is `BATCH_UNSETTLED`; after settlement `finishRun` reaches `IDLE` and a new run starts.
+  - LC-002 `validatedImmutableBatch`: empty and whitespace-only `Call.Id` are rejected.
+  - `orderedExclusiveExecution`: unknown call is `UNKNOWN_CALL` with zero callback entries and unchanged batch snapshot.
+  - `stopDuringEffect` (`STOPPING`) and `closeDrainsWithoutReopening` (`CLOSING`): repeated `stop` returns an equal acknowledged result, including an equal batch observation, before and after a rejected `beginBatch`; `beginBatch` is `RUN_NOT_ACCEPTING_BATCHES`.
+  - Matrix walk (below) found rows the reviewer did not list; added: `startRun` and `execute` in `CLOSING`; `finishRun` and `beginBatch` in `CLOSED`; `finishRun`, `stop`, `beginBatch` and `execute` with old handles in `IDLE`; `close` from `IDLE` (twice) and directly from `RUNNING` with pending cancellation.
+  - Test strength, by deliberate one-line bugs applied and reverted one at a time. Every bug was killed: blank ID accepted (`validatedImmutableBatch`); unknown call reported as out of order (`orderedExclusiveExecution`); no `RUNNING` check in `beginBatch` (`stopDuringEffect`, `closeDrainsWithoutReopening`); repeated stop rejected (same two); start allowed while stopping (`awtAdmissionSmoke`, `stopDuringEffect`); idle close enters `CLOSING`, start while `CLOSING` reports `BUSY`, close from `RUNNING` keeps pending calls (all `closeDrainsWithoutReopening`).
+- **R4-M-003 — Resolved.** Both temporary directories go through `scratch_dir()`, which creates them under `.agent-work/native-agent-spec/` and cleans them up. Selftest asserts every scratch root resolves under that directory. After the runs, the directory is empty. Disclosure: the reproduction of R4-B-002 ran the committed (pre-fix) receipt builder once, which compiled in the system temp directory.
+- **R4-N-001 — Resolved.** Missing or malformed receipts raise a tool error; `main` also maps `OSError`/`ValueError` to JSON `status: ERROR` with exit 2. Selftest covers a missing and a malformed receipt through `main`. Observed: `verify --receipt .agent-work/nope.json` prints a JSON error and exits 2.
+
+### Operation-matrix outcome to assertion checklist
+
+Maintained for the targeted gate, as R4-M-002's escape analysis required. Rows are `spec.json` `operation_matrix` in order.
+
+| # | Operation / phase / precondition → result | Asserting test(s) |
+|---|---|---|
+| 1 | startRun IDLE → Started | `singleRunOwnership`, `multipleBatchesPreserveIdentity`, `awtAdmissionSmoke` |
+| 2 | startRun RUNNING/STOPPING → BUSY | RUNNING: `singleRunOwnership`, `reentrantOperationsFromEffect`; STOPPING: `stopDuringEffect`, `awtAdmissionSmoke` |
+| 3 | startRun CLOSING/CLOSED → CLOSED | CLOSING and CLOSED: `closeDrainsWithoutReopening` |
+| 4 | beginBatch RUNNING, valid → Begun | `singleRunOwnership`, `multipleBatchesPreserveIdentity`, `nullInputDoesNotMutate` |
+| 5 | beginBatch RUNNING, failed precondition → exact reason | `PREVIOUS_BATCH_UNSETTLED`: `reentrantOperationsFromEffect`; `CALL_ID_ALREADY_ACCEPTED`: `multipleBatchesPreserveIdentity` |
+| 6 | beginBatch STOPPING/CLOSING → RUN_NOT_ACCEPTING_BATCHES | STOPPING: `stopDuringEffect`; CLOSING: `closeDrainsWithoutReopening` |
+| 7 | beginBatch IDLE/CLOSED or foreign/old run → STALE_RUN | IDLE: `multipleBatchesPreserveIdentity`; CLOSED: `closeDrainsWithoutReopening`; foreign: `staleHandleIsolation`; old: `singleRunOwnership` |
+| 8 | execute RUNNING, next pending → Executed or thrown, terminal status | `orderedExclusiveExecution`, `terminalAccounting`, `reentrantOperationsFromEffect` |
+| 9 | execute RUNNING, foreign/replaced batch → STALE_BATCH | `staleHandleIsolation` |
+| 10 | execute RUNNING, unknown/executing/terminal/out of order → exact reason | `orderedExclusiveExecution`; executing also `reentrantOperationsFromEffect` |
+| 11 | execute STOPPING/CLOSING → RUN_NOT_ACCEPTING_EFFECTS | STOPPING: `stopBeforeQueuedEffect`, `awtAdmissionSmoke`; CLOSING: `closeDrainsWithoutReopening` |
+| 12 | execute IDLE/CLOSED, no current batch → STALE_BATCH | IDLE: `multipleBatchesPreserveIdentity`; CLOSED: `closeDrainsWithoutReopening`; previous generation: `staleHandleIsolation` |
+| 13 | stop RUNNING → Acknowledged, STOPPING, pending cancelled | `stopBeforeQueuedEffect`, `stopDuringEffect`, `closeDrainsWithoutReopening` |
+| 14 | stop STOPPING/CLOSING → idempotent Acknowledged | STOPPING: `stopDuringEffect`; CLOSING: `closeDrainsWithoutReopening` |
+| 15 | stop IDLE/CLOSED or foreign/old run → STALE_RUN | IDLE: `multipleBatchesPreserveIdentity`; CLOSED: `closeDrainsWithoutReopening`; foreign and old: `staleHandleIsolation`, `singleRunOwnership` |
+| 16 | finishRun RUNNING/STOPPING, no or settled batch → Finished, IDLE | RUNNING no batch: `singleRunOwnership`; RUNNING settled: `multipleBatchesPreserveIdentity`; STOPPING: `stopDuringEffect`, `awtAdmissionSmoke` |
+| 17 | finishRun CLOSING, settled → Finished, CLOSED | `closeDrainsWithoutReopening`, `reentrantOperationsFromEffect` |
+| 18 | finishRun unsettled → BATCH_UNSETTLED | RUNNING: `multipleBatchesPreserveIdentity`, `reentrantOperationsFromEffect`; STOPPING: `stopDuringEffect`, `awtAdmissionSmoke`; CLOSING: `closeDrainsWithoutReopening` |
+| 19 | finishRun IDLE/CLOSED or foreign/old run → STALE_RUN | IDLE: `multipleBatchesPreserveIdentity`; CLOSED: `closeDrainsWithoutReopening`; foreign: `staleHandleIsolation`; old: `singleRunOwnership` |
+| 20 | close IDLE → CLOSED | `closeDrainsWithoutReopening` |
+| 21 | close RUNNING/STOPPING → CLOSING, pending cancelled | RUNNING: `closeDrainsWithoutReopening`; STOPPING: `closeDrainsWithoutReopening`, `reentrantOperationsFromEffect` |
+| 22 | close CLOSING/CLOSED → idempotent | `closeDrainsWithoutReopening` |
+| 23 | batchSnapshot current handle → Available | all batch tests; during CLOSING: `closeDrainsWithoutReopening` |
+| 24 | batchSnapshot foreign/replaced/old handle → STALE_BATCH | `staleHandleIsolation` |
+
+### Verification on the resolved basis
+
+| Check | Result |
+|---|---|
+| `./gradlew :plugin-core:test --tests '…RunLifecycleTest'` | 13 tests, 0 failures, 0 errors |
+| Same, `--rerun` five times | 5/5 BUILD SUCCESSFUL |
+| `./gradlew :plugin-core:test :plugin-core:buildPlugin --rerun` | BUILD SUCCESSFUL |
+| Deliberate one-line bugs (8) | 8/8 killed; sources restored, no diff |
+| `check_slice.py check` | PASS, no findings |
+| `check_slice.py selftest` | 18/18 PASS |
+| `check_slice.py receipt` then `verify` | PASS, digest `5a888317…0759`, no mismatches |
+| `check_slice.py verify --receipt` on a missing file | JSON `status: ERROR`, exit 2 |
+| `.agent-work/native-agent-spec/` after runs | empty |
+| `git diff --check` | clean |
+
+Not run: IDE semantic surface inspection and IDE build (S3 `EV-SURFACE`, `EV-BUILD`). The reviewer's note that the IDE's direct class test target fails with `junit.framework.TestCase` is an IDE run-configuration issue; the Gradle task, which includes the JUnit 4 runtime dependency, passes.
+
+Changed rows for the targeted gate: driver obligations (`design.md` Scope, `Effect`, `spec.json` assumptions); LC-012 checker rules and receipt verification; AC-002, AC-003, AC-008, AC-011, AC-013 test assertions. Unchanged: `RunLifecycle`, `Call`, `Batch`, `Lifecycle`, `RunHandle` production code; LC requirements; acceptance text; operation matrix.
+
+- Address status: COMPLETE
+- Implementation review status: FINAL_GATE_FAIL until the targeted gate runs
+- Reviewer checklist: COMPLETE (round 4)
+- Frozen basis: CURRENT
+- Open Blockers: 0
+- Open Majors: 0
+- Deferred Minors/Nits: 1
+- Verification: PASS
+- Final gate: FAIL (targeted gate not yet run)
+- Stop reason: awaiting targeted gate
+- Next permitted action: TARGETED_GATE
