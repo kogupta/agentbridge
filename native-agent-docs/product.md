@@ -5,7 +5,7 @@ This file is the single product authority: hypothesis, decisions, invariants, to
 ## Status
 
 - Independent review of this product scope: **not run**. The original authors performed only an author audit. Do not claim approval.
-- Implementation: only the lifecycle/admission slice exists (`plugin-core/.../nativeagent/lifecycle/`). Its review state is in `lifecycle-admission/review.md`.
+- Implementation: two slices exist, lifecycle/admission (`plugin-core/.../nativeagent/lifecycle/`) and domain and run driver (`plugin-core/.../nativeagent/run/`). Their state is in `workflow.md` Feature slices.
 - Donor removal: done intentionally, before dogfood. Branch `native-agent-workflow` removed the donor ACP/JCEF/multi-agent runtime and the PSI tool packages (commit `8791625a9` and later cleanup commits). See DONOR_SUBTRACTION. Donor tool code exists only on `master`; the donor evidence table at the end of this file refers to `master`.
 
 ## Hypothesis
@@ -357,8 +357,8 @@ Each milestone becomes a feature closure that passes SPEC_VALID and DESIGN_VALID
 
 | # | Milestone | Behavior | Required proof |
 |---|---|---|---|
-| 0 | Lifecycle/admission slice | Run ownership, sequential admission, Stop, terminal accounting | `lifecycle-admission/` S1–S3. In progress. |
-| 1 | Domain and run driver | Java algebra, minimal Kotlin driver, sequential continuation, accepted/provisional split, Stop accounting, run limits, `CacheGeneration`/`CacheReset`, dispatch-time prefix check | Platform-free tests: multi-call order, unknown/schema failure, length/malformed rejection, double Send, Stop in each state, resource-registration vs cancel race, no replay, late result retained, limits and retry scope with fake clock/transport. Prefix tests and scripted >90% structural-reuse benchmark (Prompt-cache stability). Coroutine lifetime smoke. |
+| 0 | Lifecycle/admission slice | Run ownership, sequential admission, Stop, terminal accounting | `lifecycle-admission/` S1–S3. |
+| 1 | Domain and run driver | Java algebra, minimal Kotlin driver, sequential continuation, accepted/provisional split, Stop accounting, run limits, `CacheGeneration`/`CacheReset`, dispatch-time prefix check | Platform-free tests: multi-call order, unknown/schema failure, length/malformed rejection, double Send, Stop in each state, resource-registration vs cancel race, no replay, late result retained, limits and retry scope with fake clock/transport. Prefix tests and scripted >90% structural-reuse benchmark (Prompt-cache stability). Coroutine lifetime smoke. `domain-run-driver/` S1–S3. |
 | 2 | Native semantic reads | Seven read tools, handles, readiness, no MCP/HTTP | Same-name overloads, unrelated same-name class, reference vs text occurrence, unsaved editor read, ambiguity, pagination/incomplete, indexing timeout, handle eviction/invalidation. Real IDE operations. Prefix test across reads with changing editor/index state. |
 | 3A | Semantic mutation | `replace_symbol_body`, `edit_text`, `write_file`, rename, undo, admission | Overload replacement with two declarations on one line; stale read/symbol rejected; queued Stop before EDT commit leaves file unchanged; admitted op settles before idle; rename without unrelated matches; rename usage-change race changes nothing; new-file/symlink race; undo of edit/create/rename. Prefix test across mutations. |
 | 3B | Verification | Diagnostics, build, targeted tests, run-owned formatting | Format cancellation without deferred mutation; diagnostics failure is not clean; pending is not clean; targeted failing and passing test; busy/cancel lifecycle. Prefix test across changing diagnostics and build/test results. |

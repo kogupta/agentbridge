@@ -1,6 +1,6 @@
 # Native agent — implementation workflow
 
-This file defines how a feature from `product.md` becomes code: principles, gates, reviewer contract, failure routing and the current slice stages. Product decisions live only in `product.md`; this file references them and never restates them.
+This file defines how a feature from `product.md` becomes code: principles, gates, reviewer contract, failure routing, the feature slice index and the lifecycle slice stages. Product decisions live only in `product.md`; this file references them and never restates them.
 
 ## Goal
 
@@ -203,7 +203,16 @@ If a spike is authorized: one run, bounded calls, Stop, queued/start/completion 
 
 Derive modules and dependencies from Gradle; declarations, references, implementations and callers from IntelliJ; frozen signatures from compiler-visible declarations; test outcomes from runner reports; touched files from actual mutations. Maintain only decisions, requirements, assumptions, acceptance oracles and requirement-to-enforcement mapping. No permanent graph, duplicate index, spec-to-Java generator or model of every class.
 
-## Current slice: lifecycle/admission
+## Feature slices
+
+A slice's stage bindings are in its `spec.json`. Its state is only the Current state section of its `review.md`.
+
+| Slice | Roadmap milestone | Code |
+|---|---|---|
+| `lifecycle-admission/` | 0 | `plugin-core/.../nativeagent/lifecycle/` |
+| `domain-run-driver/` | 1 | `plugin-core/.../nativeagent/run/` (Java and Kotlin) |
+
+## Lifecycle/admission slice stages
 
 Canonical requirements, audit, stage bindings and evidence IDs are in `lifecycle-admission/spec.json`. Stage checks reference those IDs and never restate them. Tooling beyond what this slice uses is not built.
 

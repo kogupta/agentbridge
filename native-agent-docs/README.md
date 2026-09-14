@@ -5,12 +5,15 @@ Each fact has one home. If two files seem to say the same thing, the file named 
 | File | Owns |
 |---|---|
 | `product.md` | Hypothesis, requirements R1–R6, decision registry, Pi fidelity, invariants I1–I13, prompt-cache stability, tool and Codex contracts, run behavior, roadmap, dogfood gate, exclusions, donor evidence. |
-| `workflow.md` | Principles, workflow invariants W1–W8, artifact layout, SPEC_VALID and DESIGN_VALID gates, reviewer contract, failure routing, current slice stages. |
+| `workflow.md` | Principles, workflow invariants W1–W8, artifact layout, SPEC_VALID and DESIGN_VALID gates, reviewer contract, failure routing, feature slice index, lifecycle slice stages. |
 | `lifecycle-admission/spec.json` | Canonical LC-001–LC-012, AC-001–AC-013, type-safety audit, operation matrix, null boundaries, evidence IDs, stage bindings. |
 | `lifecycle-admission/design.md` | Java surface, transitions, admission algorithm, precedence rules. References `spec.json` for tables. |
-| `lifecycle-admission/review.md` | Append-only review ledger: current state, rounds 1–3, the adversarial review prompt. |
+| `lifecycle-admission/review.md` | Append-only review ledger: current state, rounds 1–4, S3 qualification records, the adversarial review prompt. |
+| `domain-run-driver/spec.json` | Canonical DR-001–DR-020, AC-001–AC-018, type-safety audit, operation matrix, null boundaries, evidence IDs, stage bindings. |
+| `domain-run-driver/design.md` | Java and Kotlin surface, ownership, prompt-cache algorithm, retry and limit precedence. References `spec.json` for tables. |
+| `domain-run-driver/review.md` | Append-only review ledger: current state, specification, design and implementation review rounds 1–13. |
 
-Reading order for implementation work on the lifecycle slice: `lifecycle-admission/review.md` current state → `spec.json` → `design.md` → `workflow.md` current slice. Read `product.md` when a finding touches product scope or Pi fidelity.
+Reading order for implementation work on a slice: `<slice>/review.md` current state → `spec.json` → `design.md` → `workflow.md` feature slices. Read `product.md` when a finding touches product scope or Pi fidelity.
 
 ## Consolidation record (2026-09-14)
 
