@@ -19,6 +19,7 @@
 - Documentation, README examples, commit messages, and PR text show the normal human command such as `./gradlew test`; execution uses `mtk gradle ...`.
 - Use `gh` for GitHub operations. Do not call the GitHub API with raw HTTP or curl.
 - Use IDEA Facade for navigation and refactors. Text search is a fallback for known literals, configuration, build logs, and Markdown.
+- Search reference repositories through codeq's indexes, not broad filesystem scans: codeq source `../codeq/`, Pi `../pi/`, and IntelliJ Community `../intellij-community/`. For Pi and IntelliJ Community questions, use focused `pi-search` or `ij-search` delegation when available; otherwise run a narrow codeq query and preserve its file-and-line evidence.
 - Batch independent reads and checks. Use the lightest verification that establishes the needed fact.
 
 ## Design and domain model
