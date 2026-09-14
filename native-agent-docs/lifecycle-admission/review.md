@@ -553,3 +553,275 @@ Not run: EV-SURFACE and EV-BUILD as IDE tools (S3 evidence), and no fresh indepe
 - Final gate: FAIL (no review of the changed basis yet)
 - Stop reason: normative spec rows changed during address
 - Next permitted action: fresh independent review of the current basis
+
+## Round 4
+
+### Peer agreement
+
+- Primary reviewer: `openai-codex/gpt-5.6-sol` (current fresh session).
+- Independent peer: none, explicitly selected by user.
+- Peer exchanges permitted/used: 0/0.
+
+### Frozen review basis
+
+Basis ID: `CAP-LIFECYCLE-ADMISSION@5b2c73c42f9dc322bb09107e44f4bad06a0ef50a`. Frozen before the exhaustive pass. Rows may move from `PENDING` to `PASS`, `GAP`, or `UNSUPPORTED BY CONTRACT`; no new review dimension may be added without escape analysis or an explicit reopen.
+
+#### Commit and scope manifest
+
+- Branch/head: `native-agent-workflow` at `5b2c73c42f9dc322bb09107e44f4bad06a0ef50a`. Repository state was clean before this Round 4 ledger append.
+- Reopened address range: `c84afddea0c8e19089a22d649f8ddc76c9a6c5ae..5b2c73c42f9dc322bb09107e44f4bad06a0ef50a`; production lifecycle history also includes `fde1d58e5a83f6ba3aa54b8312d2df88adeab033` and `457e947b5c543ad6b7019fdbf41331dd8c00f098`.
+- Reviewed contract: `native-agent-docs/lifecycle-admission/spec.json`, `design.md`, relevant `product.md`/`workflow.md` clauses, and this append-only ledger.
+- Reviewed implementation: six Java files under `plugin-core/src/main/java/com/github/catatafishen/agentbridge/nativeagent/lifecycle/`, `RunLifecycleTest.java`, `plugin-core/build.gradle.kts`, and `scripts/native-spec/check_slice.py`.
+- Changed production symbols in scope: `RunLifecycle` lifecycle operations and nested closed outcomes; `Lifecycle` snapshots/phases; `Call` identities, batches, statuses and snapshots; `Batch` handles/snapshots/observations; `Effect`; `RunHandle`.
+- Planned boundary: workflow S1 receipt, S2 exact-basis independent review, then S3 lifecycle implementation qualification.
+- Excluded: provider loop, tool codec, Kotlin driver, UI/PSI integration, unrelated donor-removal/build/docs commits, and the Round 4 ledger-only mutation.
+
+#### Requirement traceability matrix
+
+| Rows | Contract and implementing evidence | Initial state |
+|---|---|---|
+| LC-001 / AC-001 | `startRun`, `finishRun`, stale-generation rejection; `singleRunOwnership` | PENDING |
+| LC-002 / AC-002 | `Call.Id`, `Call.Batch.of`; `validatedImmutableBatch` | PENDING |
+| LC-003 / AC-003 | `beginBatch`, `rejectExecution`, `BatchState`; `orderedExclusiveExecution` | PENDING |
+| LC-004 / AC-004, AC-013 | `execute`/`stop` monitor boundary; executor and real-AWT race scenarios | PENDING |
+| LC-005 / AC-005 | `stop`, pending cancellation, explicit settlement; `stopDuringEffect` | PENDING |
+| LC-006 / AC-006 | `execute`, `recordFailure`, unchecked same-object rethrow; `terminalAccounting` | PENDING |
+| LC-007 / AC-007 | owner/generation identity and handle-free snapshots; `staleHandleIsolation` | PENDING |
+| LC-008 / AC-008 | `close`, closing drain, permanent closed state; `closeDrainsWithoutReopening` | PENDING |
+| LC-009 / AC-009 | closed non-generic API and pre-mutation null checks; signature receipt and `nullInputDoesNotMutate` | PENDING |
+| LC-010 / AC-010 | callback outside monitor and immutable snapshots; `nonblockingStopAndImmutableSnapshots` | PENDING |
+| LC-011 / AC-011 | run-wide ID set and transactional batch replacement; `multipleBatchesPreserveIdentity` | PENDING |
+| LC-012 / AC-012 | strict checker, S1 receipt, altered-basis selftests and exact verification | PENDING |
+| Driver obligations | cooperative cancellation, thrown-effect conversion, no detached work, no truncated-call admission | PENDING |
+
+#### Behavior grammar matrix
+
+| Dimension | Frozen cells | Initial state |
+|---|---|---|
+| Lifecycle phases | IDLE, RUNNING, STOPPING, CLOSING, CLOSED | PENDING |
+| Public operations | startRun, beginBatch, execute, stop, finishRun, close, snapshot, batchSnapshot | PENDING |
+| Handle identity | current, foreign owner, previous generation, replaced batch, package-forged inert handle | PENDING |
+| Batch/call shape | null, blank, empty, duplicate, caller-mutated, fresh, reused, mixed fresh/reused, unknown call | PENDING |
+| Call status/order | PENDING, EXECUTING, COMPLETED, FAILED_AFTER_START, CANCELLED_BEFORE_START; next, later, repeated | PENDING |
+| Concurrency/reentrancy | two starts, duplicate execute, Stop-before-admission, admission-before-Stop, blocked callback, reentrant operations | PENDING |
+| Effect completion | normal return, RuntimeException, Error, checked sneaky throw, accounting failure, non-returning/detached work | PENDING |
+| Observation | current/old lifecycle snapshot, current/replaced/foreign batch snapshot, collection mutation | PENDING |
+| Evidence failure | malformed spec, missing audit/target, altered source/design/config/receipt, unavailable compiler | PENDING |
+
+#### Change-impact map
+
+| Changed area | Entry points and neighboring contracts to preserve | Initial state |
+|---|---|---|
+| `RunLifecycle` owner state | every public operation, shared monitor, `BatchState`, all nested result algebras | PENDING |
+| `Effect` throwable contract | Java/Kotlin callers, driver cancellation/error conversion, terminal accounting | PENDING |
+| Identity/value types | constructors/factories, collection ownership, package visibility, snapshot payloads | PENDING |
+| Spec/design | LC/AC bindings, operation/null matrices, product invariants I3/I4/I8, workflow S1-S3 | PENDING |
+| `check_slice.py` | strict parsing, target discovery, source/config hashing, javac/javap, tamper rejection | PENDING |
+| Test/build wiring | JUnit Platform/IntelliJ listener runtime, focused test executor, module build | PENDING |
+
+#### Per-commit/stage contract audit
+
+| Boundary | Required independent outcome | Initial state |
+|---|---|---|
+| S1 | current receipt binds exact spec/design/sources/config and structural/compile/signature evidence | PENDING |
+| S2 | this exact-basis review covers every LC/AC/matrix/audit row with no open Blocker/Major | PENDING |
+| S3 | focused lifecycle tests, real-AWT smoke, IDE build and semantic surface inspection pass | PENDING |
+| Address commits | throwable fix, checker/receipt, review dispositions, and final doc corrections each preserve earlier passing rows | PENDING |
+
+#### Test-strength audit
+
+Each AC test must fail at least one plausible wrong implementation: accepting a second/stale owner; aliasing or malformed batches; admitting later/duplicate calls; checking Stop before queueing rather than at execution; cancelling executing work; catching only unchecked throwables or changing throwable identity; accepting foreign/replaced handles; reopening after close; mutating before null rejection; holding the monitor during callback; poisoning a fresh ID on rejected mixed admission; accepting stale/tampered evidence; or treating AWT queue admission as equivalent to pre-enqueue admission. Initial state: PENDING.
+
+#### Weak-implementer traces
+
+1. Fresh run → batch `[A,B]` → A admitted → Stop → B cancelled → A throwable/normal settlement → finish; trace every branch and neighboring no-Stop path.
+2. Settled batch A → reject `[freshB,reusedA]` without mutation → accept/execute freshB; compare foreign, replaced and previous-generation handles.
+3. Valid basis → receipt → verify; mutate audit, source, design, config and digest separately; require rejection without claiming behavior evidence.
+
+Frozen basis status: CURRENT; exhaustive pass not yet started.
+
+### Executive verdict
+
+**FAIL.** The lifecycle state machine itself satisfies the reviewed LC-001 through LC-011 transitions, including the any-`Throwable` repair. S2 cannot pass. The driver failure policy now conflicts with the product authority, the S1 verifier accepts a tampered evidence payload, the structural checker does not enforce its unknown-field contract, required public outcomes remain untested, and the checker writes temporary trees outside the repository workspace.
+
+### Findings table
+
+| ID | Severity | Frozen-basis row | Summary |
+|---|---|---|---|
+| R4-B-001 | Blocker | Driver obligations; `Effect` impact | Product says a side-effect failure stops automatic continuation; design says the driver continues; `Effect` leaves the choice open. |
+| R4-B-002 | Blocker | LC-012 / AC-012; S1 receipt | `verify` authenticates `evidence_hashes` but never authenticates the stored `evidence` payload those hashes claim to bind. |
+| R4-M-001 | Major | LC-012 strict structure | `check` rejects unknown top-level fields only; unknown fields inside normative rows pass despite the workflow contract. |
+| R4-M-002 | Major | LC-002, LC-004, operation grammar, test strength | AC-013 and several public invariant/matrix outcomes have no regression assertion. |
+| R4-M-003 | Major | Checker impact; repository workspace contract | Receipt compilation and selftest use default system temporary directories instead of `.agent-work/`. |
+| R4-N-001 | Minor | Evidence failure grammar | Missing or malformed receipt input escapes as an uncaught exception instead of the documented JSON tool error with exit 2. |
+
+### Escape analysis — R4-B-001
+
+- New material evidence since Round 3: yes. The Round 3 address pass added the driver-owned failure/continuation prose.
+- Frozen-basis row that should have caught it: Round 3 M-002 disposition and the product/design parity row; Round 4 `Effect` change-impact row.
+- Why Round 3 marked that row complete: it checked cancellation-token ownership and Pi's thrown-error conversion, but did not compare the new prose with the product run-behavior table.
+- Classification: FIX_REGRESSION.
+- Required workflow correction: treat `product.md` as authority and align `design.md`, `Effect` Javadoc and the resolution record, or reopen the product decision explicitly before choosing Pi-style continuation.
+
+### Escape analysis — R4-B-002
+
+- New material evidence since Round 3: yes. `check_slice.py` and the receipt format were created in the address pass after the Round 3 review.
+- Frozen-basis row that should have caught it: LC-012 / EV-RECEIPT tamper rejection and the receipt weak-implementer trace.
+- Why Round 3 marked that row complete: the new selftest altered an identity field and checked the digest; it never altered an attached evidence result while preserving the identity fields.
+- Classification: FIX_REGRESSION.
+- Required workflow correction: add stored-evidence authentication and a payload-tamper selftest before rerunning the targeted gate.
+
+### Escape analysis — R4-M-001
+
+- New material evidence since Round 3: yes. The structural checker was created after the Round 3 review.
+- Frozen-basis row that should have caught it: LC-012 strict structure and workflow `Mechanical checks (spec-lint)`.
+- Why Round 3 marked that row complete: the selftest removed one audit row; it did not inject an unknown field below the top level.
+- Classification: FIX_REGRESSION.
+- Required workflow correction: freeze allowed/required fields for every normative record and add one nested unknown-field mutation to selftest.
+
+### Escape analysis — R4-M-002
+
+- New material evidence since Round 3: no for the missing AC-013 settlement assertion; the Round 3 finding already named it. The other uncovered invariant/matrix rows were also readable from the same spec and tests.
+- Frozen-basis row that should have caught it: requirement-to-test traceability, operation-by-phase matrix coverage and test-strength audit.
+- Why Round 3 marked that row complete: the resolution summarized changed tests without tracing each acceptance sentence and matrix outcome back to an assertion.
+- Classification: REVIEW_MISS.
+- Required workflow correction: maintain an explicit matrix-outcome-to-assertion checklist in the targeted gate and require each public rejection/transition to fail a plausible wrong implementation.
+
+### Escape analysis — R4-M-003
+
+- New material evidence since Round 3: yes. The checker introduced both default `TemporaryDirectory()` calls after the review.
+- Frozen-basis row that should have caught it: checker change-impact and repository workspace compliance.
+- Why Round 3 marked that row complete: receipt behavior was checked, but its filesystem boundary was not.
+- Classification: FIX_REGRESSION.
+- Required workflow correction: add workspace-path inspection for development tools that create temporary files.
+
+### Concrete proof and required corrections
+
+#### R4-B-001 — contradictory failed-effect continuation policy
+
+- `native-agent-docs/product.md:3` declares `product.md` the single product authority.
+- `product.md:247` says `FAILED_AFTER_START` has “No automatic continuation; user inspects.”
+- `native-agent-docs/lifecycle-admission/design.md:13` assigns the driver conversion **and continuing**, as Pi does.
+- `Effect.java:6-8` says the driver decides whether the run continues.
+
+These are three different policies: mandatory stop, mandatory Pi-style continuation, and driver discretion. The lifecycle permits the next call after a failed effect settles, so the future driver needs one answer before it can use the API safely.
+
+Correction: preserve the product-authoritative safety rule unless the product gate is deliberately reopened. State that the driver records/converts the failed result but does not automatically execute later calls after a side-effect failure. Update design and `Effect` Javadoc together. Add a driver acceptance row before integration; this slice can document it because the driver remains out of scope.
+
+#### R4-B-002 — evidence payload is not covered by its hashes
+
+`build_receipt` hashes each evidence object into `evidence_hashes` (`check_slice.py:275-291`). `verify_receipt` checks the digest and compares identity fields with a fresh receipt (`300-314`), but never recomputes hashes from `stored["evidence"]`.
+
+Reproduction against the frozen basis:
+
+```text
+receipt.evidence["EV-DESIGN-COMPILE"]["status"] = "FAIL"
+receipt.evidence["EV-DESIGN-COMPILE"]["output"] = "forged output"
+verify_receipt(...) -> []
+reported verification -> PASS
+```
+
+The untouched `evidence_hashes`, identity digest and current-basis comparison all pass while the attached compile evidence is forged. This violates LC-012's evidence-result binding and W2's fail-closed exact receipt.
+
+Correction: require exactly the expected evidence keys; recompute `sha256(canonical(stored evidence item))` for every stored payload; compare those hashes with stored `evidence_hashes` before comparing the current basis. Add selftests for changed evidence status/output, missing evidence, extra evidence and mismatched evidence hash.
+
+#### R4-M-001 — nested unknown fields pass the strict checker
+
+`check_spec` computes `unknown = sorted(set(spec) - set(REQUIRED_TOP))` only at `check_slice.py:90-95`. Requirements, acceptance rows, audit rows, evidence rows, stage bindings, operation rows, receipt identity and null-boundary rows have no allowed-field validation. `workflow.md:109` requires unknown fields to be rejected.
+
+Reproduction: add `"unknown_typo_field": true` to LC-001. `check_spec` returns no findings and reports PASS.
+
+Correction: define finite allowed/required keys per record kind and emit a stable diagnostic for every unknown nested field. Selftest at least one normative row and one nested stage binding. Also require `RunLifecycleTest#method` targets to resolve to `@Test` methods, not any `void` helper matched by regex.
+
+#### R4-M-002 — required outcomes can regress without a test failure
+
+- AC-013 says the owner cannot start another run until the admission-winning AWT callback settles (`spec.json:177-180`). `awtAdmissionSmoke` stops at `RunLifecycleTest.java:424`, releases at `425`, and observes completion at `426-427`; it never calls `startRun` or `finishRun` before release. Deleting the busy/unsettled protection would not fail this scenario.
+- LC-002 requires nonblank IDs (`spec.json:25-29`), but `validatedImmutableBatch` covers empty batch, nulls, duplicates and aliasing only (`RunLifecycleTest.java:46-60`). Deleting `Call.Id.value().isBlank()` would leave all 13 tests green.
+- No test mentions `RUN_NOT_ACCEPTING_BATCHES` or `UNKNOWN_CALL`. A wrong rejection or accidental admission in those public matrix cells would remain green.
+- No test invokes `stop` twice with the current handle in STOPPING or CLOSING, although the matrix and design promise idempotent acknowledgement.
+
+Correction: extend the existing cohesive scenarios. In the AWT admission-wins half, assert `startRun -> BUSY` and `finishRun -> BATCH_UNSETTLED` before release. Add empty and whitespace-only `Call.Id` cases. Assert unknown current-batch call rejection with zero callback entry. Assert current-run `beginBatch` rejection in STOPPING and CLOSING. Assert repeated Stop returns acknowledged snapshots without mutation in both phases.
+
+#### R4-M-003 — temporary work escapes the project workspace
+
+`check_slice.py:251` and `:342` call `tempfile.TemporaryDirectory()` with no `dir`. They therefore use the process default, normally `/tmp`, while the repository contract requires all temporary files under `.agent-work/`. The receipt command copies source/config into and compiles classes outside the project-controlled workspace.
+
+Correction: create a stable `.agent-work/native-agent-spec/` parent and pass it as `dir` for both temporary directories. Keep automatic cleanup. Add a selftest assertion that each scratch root resolves under `.agent-work/`.
+
+#### R4-N-001 — tool failures do not use the documented protocol
+
+The module documents exit 2 for tool/environment failure (`check_slice.py:12`). `main` catches only `ToolError` (`403-428`). `verify --receipt .agent-work/does-not-exist.json` raises `FileNotFoundError` from `load_strict` instead of returning JSON `status=ERROR`.
+
+Correction: translate expected `OSError`/parse failures at command boundaries into `ToolError` and add missing/malformed-receipt command tests.
+
+### Frozen-basis disposition
+
+#### Requirement traceability
+
+- PASS: LC-001, LC-003, LC-005 through LC-011 implementation behavior and AC bindings.
+- GAP: LC-002 proof omits nonblank IDs; LC-004/AC-013 omits pre-settlement new-run rejection; LC-012 receipt/strict-check enforcement fails R4-B-002 and R4-M-001.
+- GAP: driver obligations conflict under R4-B-001.
+
+#### Behavior grammar
+
+- PASS: lifecycle phases/transitions in source; current/foreign/old/replaced identity; ordered status transitions; normal/unchecked/checked throwable accounting; immutable observations; Stop/admission monitor order and reentrancy.
+- GAP: blank Call.Id, unknown call, STOPPING/CLOSING batch admission and repeated Stop lack regression proof.
+- GAP: evidence grammar accepts a forged stored payload and unknown nested fields.
+- UNSUPPORTED BY CONTRACT: unconditional callback termination and discovery of detached work; safety remains truthful while an effect never returns.
+
+#### Change impact and stage audit
+
+- PASS: `RunLifecycle`, identity/value types and throwable settlement source behavior. Text search found no production consumer outside the six declarations; only `RunLifecycleTest` uses the owner in this branch.
+- GAP: `Effect`/driver policy, spec/checker enforcement and acceptance strength.
+- S1: FAIL because EV-RECEIPT and strict structure are unsound despite the current receipt verifying.
+- S2: FAIL with two Blockers and three Majors.
+- S3: PARTIAL. The Gradle lifecycle run configuration and IDE build pass, but S2 is not satisfied and the native direct test target failed before discovery.
+- Address commits: FAIL; the address pass introduced R4-B-001, R4-B-002, R4-M-001 and R4-M-003, and did not close the known AC-013 assertion gap.
+
+#### Test-strength and weak-implementer traces
+
+- Trace 1 (run/batch/Stop/settlement) and Trace 2 (mixed-ID atomicity and stale identity): PASS in source and focused tests.
+- Trace 3 (receipt tamper): FAIL for stored evidence payload tampering.
+- Test strength: GAP under R4-M-002.
+
+### Verified invariants
+
+- One owner monitor linearizes run, batch, effect admission, Stop, close and completion mutations. No monitor is held during `Effect.execute`.
+- Any callback `Throwable`, including a checked sneaky throw, reaches failure accounting and is rethrown as the same object. Public operations cannot replace the executing batch before accounting.
+- Stop/close mutate only PENDING calls; executing and terminal statuses are retained.
+- `beginBatch` validates unsettled state and all reused IDs before installing a batch or mutating the run-wide accepted-ID set.
+- Run and batch identity checks reject foreign, replaced and previous-generation handles. Snapshots contain immutable values and no handles.
+- Public mutating arguments are null-checked before owner mutation. Lifecycle production imports are limited to same-package and `java.util` types.
+- Current source receipt digest is `d03e8ab72d9d774f93c09ea6dd5150d82140a2f77e6768ba3160bc1a324ced80`; its six declaration hashes match the frozen tree. This does not cure R4-B-002.
+
+### Verification observed
+
+| Check | Result |
+|---|---|
+| Repository basis before Round 4 append | branch `native-agent-workflow`, head `5b2c73c…`, clean |
+| Current `check_spec` implementation | PASS, no findings |
+| Current `selftest` implementation | 7/7 PASS |
+| Current receipt rebuild and stored receipt verification | PASS, digest `d03e8ab7…ed80`, no mismatches |
+| Adversarial evidence-payload mutation | **Verifier incorrectly PASS**, no mismatches |
+| Adversarial nested unknown-field mutation | **Checker incorrectly PASS**, no findings |
+| Existing Gradle `RunLifecycleTest` run configuration | exit 0 |
+| Native direct class test target | FAIL before discovery: IntelliJ `JUnit5TestSessionListener` could not load `junit.framework.TestCase`; reported separately as a tool/classpath problem |
+| IDE incremental build | PASS, no errors |
+| IDE diagnostics over six sources, test and checker | complete; 0 errors, one unused-public-method warning for `Batch.Snapshot.isSettled` |
+| Consumer search | only lifecycle declarations and `RunLifecycleTest`; semantic reference endpoint unavailable, bounded text search used and limitation recorded |
+| Working tree after review | only this append-only `review.md` changed |
+
+The Python gate probes invoked the actual `check_slice.py` functions in-process because the IDE could not create a Python run configuration. Disposable probe state lived under `.agent-work/` and was removed. The checker itself still violates that location rule internally under R4-M-003.
+
+Review status: FINDINGS_READY_FOR_ADDRESS
+Reviewer checklist: COMPLETE
+Frozen basis: CURRENT
+Peer agreement: openai-codex/gpt-5.6-sol + none
+Peer exchanges used: 0
+Open Blockers: 2
+Open Majors: 3
+Deferred Minors/Nits: 2 (round-3 N-003; R4-N-001 may be fixed or explicitly deferred)
+Verification: FAIL
+Review rounds: 4
+Stop reason: R4-B-001, R4-B-002, R4-M-001, R4-M-002 and R4-M-003 remain open
+Next permitted action: ADDRESS_FINDINGS
