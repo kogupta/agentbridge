@@ -47,6 +47,8 @@ class RunLifecycleTest {
     void validatedImmutableBatch() {
         Call.Id first = new Call.Id("first");
         Call.Id duplicate = new Call.Id("duplicate");
+        assertThrows(IllegalArgumentException.class, () -> new Call.Id(""));
+        assertThrows(IllegalArgumentException.class, () -> new Call.Id(" \t\n"));
         assertThrows(IllegalArgumentException.class, () -> Call.Batch.of(List.of()));
         assertThrows(NullPointerException.class, () -> Call.Batch.of(null));
         assertThrows(IllegalArgumentException.class, () -> Call.Batch.of(List.of(duplicate, duplicate)));
@@ -70,7 +72,13 @@ class RunLifecycleTest {
         CountDownLatch release = new CountDownLatch(1);
         AtomicInteger firstEntries = new AtomicInteger();
         AtomicInteger secondEntries = new AtomicInteger();
+        AtomicInteger unknownEntries = new AtomicInteger();
 
+        assertEquals(new RunLifecycle.ExecutionResult.Rejected(RunLifecycle.ExecutionRejection.UNKNOWN_CALL),
+            lifecycle.execute(batch, new Call.Id("unknown"), unknownEntries::incrementAndGet));
+        assertEquals(0, unknownEntries.get());
+        assertEquals(List.of(new Call.Snapshot(first, Call.Status.PENDING), new Call.Snapshot(second, Call.Status.PENDING)),
+            availableSnapshot(lifecycle.batchSnapshot(batch)).calls());
         assertEquals(new RunLifecycle.ExecutionResult.Rejected(RunLifecycle.ExecutionRejection.OUT_OF_ORDER),
             lifecycle.execute(batch, second, secondEntries::incrementAndGet));
 
@@ -149,7 +157,12 @@ class RunLifecycleTest {
                     await(release);
                 }));
             assertTrue(entered.await(5, TimeUnit.SECONDS));
-            assertInstanceOf(RunLifecycle.StopResult.Acknowledged.class, lifecycle.stop(run));
+            RunLifecycle.StopResult firstStop = lifecycle.stop(run);
+            assertInstanceOf(RunLifecycle.StopResult.Acknowledged.class, firstStop);
+            assertEquals(firstStop, lifecycle.stop(run));
+            assertEquals(new RunLifecycle.BeginBatchResult.Rejected(RunLifecycle.BatchRejection.RUN_NOT_ACCEPTING_BATCHES),
+                lifecycle.beginBatch(run, Call.Batch.of(List.of(new Call.Id("while-stopping")))));
+            assertEquals(firstStop, lifecycle.stop(run));
             assertEquals(new RunLifecycle.StartRunResult.Rejected(RunLifecycle.StartRejection.BUSY), lifecycle.startRun());
             assertEquals(new RunLifecycle.FinishRunResult.Rejected(RunLifecycle.FinishRejection.BATCH_UNSETTLED), lifecycle.finishRun(run));
             release.countDown();
@@ -276,6 +289,15 @@ class RunLifecycleTest {
             assertEquals(Lifecycle.Phase.STOPPING, stoppedPhase(lifecycle.stop(run)));
             assertEquals(Lifecycle.Phase.CLOSING, lifecycle.close().phase());
             assertEquals(Lifecycle.Phase.CLOSING, lifecycle.close().phase());
+            RunLifecycle.StopResult closingStop = lifecycle.stop(run);
+            assertEquals(Lifecycle.Phase.CLOSING, stoppedPhase(closingStop));
+            assertEquals(closingStop, lifecycle.stop(run));
+            assertEquals(new RunLifecycle.BeginBatchResult.Rejected(RunLifecycle.BatchRejection.RUN_NOT_ACCEPTING_BATCHES),
+                lifecycle.beginBatch(run, Call.Batch.of(List.of(new Call.Id("while-closing")))));
+            assertEquals(closingStop, lifecycle.stop(run));
+            assertEquals(new RunLifecycle.StartRunResult.Rejected(RunLifecycle.StartRejection.CLOSED), lifecycle.startRun());
+            assertEquals(new RunLifecycle.ExecutionResult.Rejected(RunLifecycle.ExecutionRejection.RUN_NOT_ACCEPTING_EFFECTS),
+                lifecycle.execute(batch, pending, () -> { }));
             assertEquals(Call.Status.EXECUTING, batchStatus(lifecycle, batch, active));
             assertEquals(Call.Status.CANCELLED_BEFORE_START, batchStatus(lifecycle, batch, pending));
             assertEquals(new RunLifecycle.FinishRunResult.Rejected(RunLifecycle.FinishRejection.BATCH_UNSETTLED),
@@ -292,8 +314,24 @@ class RunLifecycleTest {
             assertEquals(new RunLifecycle.ExecutionResult.Rejected(RunLifecycle.ExecutionRejection.STALE_BATCH),
                 lifecycle.execute(batch, pending, () -> { }));
             assertEquals(new RunLifecycle.StopResult.Rejected(RunLifecycle.StopRejection.STALE_RUN), lifecycle.stop(run));
+            assertEquals(new RunLifecycle.FinishRunResult.Rejected(RunLifecycle.FinishRejection.STALE_RUN), lifecycle.finishRun(run));
+            assertEquals(new RunLifecycle.BeginBatchResult.Rejected(RunLifecycle.BatchRejection.STALE_RUN),
+                lifecycle.beginBatch(run, Call.Batch.of(List.of(new Call.Id("after-close")))));
             assertEquals(Lifecycle.closed(), lifecycle.snapshot());
         }
+
+        RunLifecycle idle = new RunLifecycle();
+        assertEquals(Lifecycle.closed(), idle.close());
+        assertEquals(Lifecycle.closed(), idle.close());
+        assertEquals(new RunLifecycle.StartRunResult.Rejected(RunLifecycle.StartRejection.CLOSED), idle.startRun());
+
+        RunLifecycle running = new RunLifecycle();
+        RunHandle runningRun = startedRun(running);
+        Call.Id queued = new Call.Id("queued");
+        Batch.Handle runningBatch = begunBatch(running, runningRun, queued);
+        assertEquals(Lifecycle.Phase.CLOSING, running.close().phase());
+        assertEquals(Call.Status.CANCELLED_BEFORE_START, batchStatus(running, runningBatch, queued));
+        assertEquals(Lifecycle.Phase.CLOSED, finishedPhase(running.finishRun(runningRun)));
     }
 
     @Test
@@ -383,6 +421,14 @@ class RunLifecycleTest {
         lifecycleExecute(lifecycle, freshBatch, freshB);
         assertEquals(Call.Status.COMPLETED, batchStatus(lifecycle, freshBatch, freshB));
         assertEquals(Lifecycle.Phase.IDLE, finishedPhase(lifecycle.finishRun(run)));
+
+        assertEquals(new RunLifecycle.FinishRunResult.Rejected(RunLifecycle.FinishRejection.STALE_RUN), lifecycle.finishRun(run));
+        assertEquals(new RunLifecycle.StopResult.Rejected(RunLifecycle.StopRejection.STALE_RUN), lifecycle.stop(run));
+        assertEquals(new RunLifecycle.BeginBatchResult.Rejected(RunLifecycle.BatchRejection.STALE_RUN),
+            lifecycle.beginBatch(run, Call.Batch.of(List.of(new Call.Id("idle")))));
+        assertEquals(new RunLifecycle.ExecutionResult.Rejected(RunLifecycle.ExecutionRejection.STALE_BATCH),
+            lifecycle.execute(freshBatch, freshB, () -> { }));
+        assertEquals(Lifecycle.idle(), lifecycle.snapshot());
         assertInstanceOf(RunLifecycle.StartRunResult.Started.class, lifecycle.startRun());
     }
 
@@ -422,9 +468,15 @@ class RunLifecycleTest {
         })));
         assertTrue(effectEntered.await(5, TimeUnit.SECONDS));
         assertEquals(Lifecycle.Phase.STOPPING, stoppedPhase(admittedLifecycle.stop(admittedRun)));
+        assertEquals(Call.Status.EXECUTING, batchStatus(admittedLifecycle, admittedBatch, admittedCall));
+        assertEquals(new RunLifecycle.StartRunResult.Rejected(RunLifecycle.StartRejection.BUSY), admittedLifecycle.startRun());
+        assertEquals(new RunLifecycle.FinishRunResult.Rejected(RunLifecycle.FinishRejection.BATCH_UNSETTLED),
+            admittedLifecycle.finishRun(admittedRun));
         releaseEffect.countDown();
         assertEquals(new RunLifecycle.ExecutionResult.Executed(), admittedResult.get());
         assertEquals(Call.Status.COMPLETED, batchStatus(admittedLifecycle, admittedBatch, admittedCall));
+        assertEquals(Lifecycle.Phase.IDLE, finishedPhase(admittedLifecycle.finishRun(admittedRun)));
+        assertInstanceOf(RunLifecycle.StartRunResult.Started.class, admittedLifecycle.startRun());
     }
 
     private static void assertTerminalStatus(Effect effect) {
