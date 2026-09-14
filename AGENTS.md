@@ -19,8 +19,54 @@
 - Documentation, README examples, commit messages, and PR text show the normal human command such as `./gradlew test`; execution uses `mtk gradle ...`.
 - Use `gh` for GitHub operations. Do not call the GitHub API with raw HTTP or curl.
 - Use IDEA Facade for navigation and refactors. Text search is a fallback for known literals, configuration, build logs, and Markdown.
-- Search reference repositories through codeq's indexes, not broad filesystem scans: codeq source `../codeq/`, Pi `../pi/`, and IntelliJ Community `../intellij-community/`. For Pi and IntelliJ Community questions, use focused `pi-search` or `ij-search` delegation when available; otherwise run a narrow codeq query and preserve its file-and-line evidence.
 - Batch independent reads and checks. Use the lightest verification that establishes the needed fact.
+
+## Reference source navigation with codeq
+
+Use the installed `codeq` CLI and its prebuilt indexes instead of scanning these repositories with grep, rg, find, or IDE-wide text search. Source locations: codeq `../codeq/`, Pi `../pi/`, IntelliJ Community `../intellij-community/`. Query names are `pi` and `ij`; output paths are relative to the corresponding source root.
+
+Start with `codeq repos`, `codeq pi status`, or `codeq ij status` when repository/index availability matters. Do not rebuild an index during ordinary research. If codeq warns that its indexed commit differs from HEAD or indexed files are dirty, confirm cited lines from source and disclose the stale-index risk. Exit 1 means no result, 2 means bad usage or ambiguous name, and 3 means an index/configuration problem.
+
+Choose the command by question:
+
+```text
+# Named declaration or method: always try sym first
+codeq pi sym runAgentLoop
+codeq pi sym Agent.prompt
+codeq ij sym com.intellij.psi.PsiElement
+codeq ij sym 'DumbService#isDumbAware'
+
+# File declarations with nested line ranges; members of one type
+codeq pi outline packages/agent/src/agent-loop.ts
+codeq pi members 'packages/agent/src/agent.ts#Agent'
+codeq ij outline platform/core-api/src/com/intellij/psi/PsiElement.java
+codeq ij members com.intellij.openapi.project.DumbService
+
+# Type relationships and direct importers
+codeq ij subtypes PsiReferenceContributor --depth 3
+codeq ij supertypes YAMLJsonSchemaIdReferenceContributor
+codeq ij importers com.intellij.psi.PsiReferenceContributor
+codeq pi importers packages/ai/src/index.ts
+
+# IntelliJ extension points and registrations
+codeq ij ep referenceContributor
+codeq ij regs com.intellij.completion.contributor
+codeq ij regs XPathCompletionContributor
+
+# Concept search when no identifier is known; always use a narrow group/directory
+codeq pi search "retry a failed provider request" --in ai
+codeq ij search "register reference providers" --in psi
+
+# Call sites, literals, configuration keys, object members, and unindexed symbols
+codeq pi text 'runAgentLoop(' --ext ts --in agent
+codeq pi text 'retry' -i -l --ext ts --in ai
+codeq ij text 'forEachExtensionSafe'
+codeq ij text 'fun \w+ReadAction\(' --regex --ext kt
+```
+
+Use `sym` first for a named type/function/method, `search` first for a behavior or intent without an identifier, `outline` or `members` to locate the smallest ranges to read, and `text` for exact call sites or literals. `search` results and codeq rows are candidates, not final citations: read the cited source range, verify the exact symbol and behavior, then cite `<repo-relative-path>:<line>`. Qualified Pi names may use `path#Name` or `path#Class.method`. Narrow `--in`, `--ext`, and `--limit` before accepting large output.
+
+For an independent Pi or IntelliJ question, a main agent may delegate one focused read-only query to `pi-search` or `ij-search`. Use separate subagents only for genuinely independent questions or when the user requests parallel work. Give each subagent the exact question and require repository-relative file-and-line citations. Do not delegate top-level design or ask a subagent to modify either reference repository.
 
 ## Design and domain model
 
