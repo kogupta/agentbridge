@@ -349,7 +349,7 @@
     {
       "id": "EV-RECEIPT",
       "kind": "command",
-      "description": "Exact-basis receipt identity check rejects altered spec, design, declaration/source, configuration or evidence result hashes. Command: python3 scripts/native-spec/check_slice.py verify --receipt <path>."
+      "description": "Exact-basis receipt identity check rejects altered spec, design, declaration/source, configuration, checker, acceptance-target source or evidence result hashes. Command: python3 scripts/native-spec/check_slice.py verify --receipt <path>."
     }
   ],
   "stages": [
@@ -661,6 +661,7 @@
       "design_hash",
       "declaration_hashes",
       "configuration_identity",
+      "evidence_input_hashes",
       "evidence_hashes",
       "status"
     ],

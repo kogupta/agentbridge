@@ -32,6 +32,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SPEC = "native-agent-docs/lifecycle-admission/spec.json"
 DESIGN = "native-agent-docs/lifecycle-admission/design.md"
+CHECKER = "scripts/native-spec/check_slice.py"
 SOURCE_DIR = "plugin-core/src/main/java/com/github/catatafishen/agentbridge/nativeagent/lifecycle"
 TEST_DIR = "plugin-core/src/test/java/com/github/catatafishen/agentbridge/nativeagent/lifecycle"
 CONFIG_FILES = [
@@ -46,27 +47,30 @@ SCRATCH_ROOTS_SEEN: list[str] = []
 DEFAULT_RECEIPT = ".agent-work/native-agent-docs/lifecycle-admission/s1-receipt.json"
 STAGE = "S1"
 RECEIPT_IDENTITY = ["stage", "feature", "spec_hash", "design_hash", "declaration_hashes",
-                    "configuration_identity", "evidence_hashes", "status"]
+                    "configuration_identity", "evidence_input_hashes", "evidence_hashes", "status"]
 REQUIRED_TOP = {
-    "format_version": int, "feature": str, "scope": str, "decisions": dict, "requirements": list,
-    "acceptance": list, "type_safety_audit": list, "audit_dimensions": list, "non_goals": list,
-    "assumptions": list, "evidence": list, "stages": list, "open_decisions": list,
-    "operation_matrix": list, "receipt_identity": dict, "null_boundary_matrix": list,
+    "format_version": int, "feature": str, "scope": str, "decisions": dict,
+    "requirements": [dict], "acceptance": [dict], "type_safety_audit": [dict],
+    "audit_dimensions": [str], "non_goals": [str], "assumptions": [str],
+    "evidence": [dict], "stages": [dict], "open_decisions": [str],
+    "operation_matrix": [dict], "receipt_identity": dict, "null_boundary_matrix": [dict],
 }
 
 
-RECORD_FIELDS = {  # kind: (required, optional)
-    "requirements": ({"id", "statement", "acceptance"}, set()),
-    "acceptance": ({"id", "when", "then", "target"}, set()),
-    "type_safety_audit": ({"requirement", "invalid", "type_api_prevention", "residual_runtime_obligation",
-                           "justification"}, set()),
-    "evidence": ({"id", "kind", "description"}, set()),
-    "stages": ({"id", "entry", "exit", "outcome"}, {"depends_on"}),
-    "operation_matrix": ({"operation", "phase", "result", "next_phase"}, {"precondition"}),
-    "null_boundary_matrix": ({"operation", "null_input", "expected"}, set()),
+RECORD_SCHEMAS = {  # kind: (required fields, optional fields)
+    "requirements": ({"id": str, "statement": str, "acceptance": [str]}, {}),
+    "acceptance": ({"id": str, "when": str, "then": str, "target": str}, {}),
+    "type_safety_audit": ({"requirement": str, "invalid": str, "type_api_prevention": str,
+                           "residual_runtime_obligation": str, "justification": str}, {}),
+    "evidence": ({"id": str, "kind": str, "description": str}, {}),
+    "stages": ({"id": str, "entry": [dict], "exit": [dict], "outcome": str},
+               {"depends_on": [str]}),
+    "operation_matrix": ({"operation": str, "phase": str, "result": str, "next_phase": str},
+                         {"precondition": str}),
+    "null_boundary_matrix": ({"operation": str, "null_input": str, "expected": str}, {}),
 }
-STAGE_BINDING_FIELDS = {"requirements", "evidence"}
-RECEIPT_IDENTITY_FIELDS = {"fields", "volatile_fields_excluded_from_digest"}
+STAGE_BINDING_SCHEMA = {"requirements": [str], "evidence": [str]}
+RECEIPT_IDENTITY_SCHEMA = {"fields": [str], "volatile_fields_excluded_from_digest": [str]}
 EVIDENCE_KINDS = {"source", "command", "review", "tool"}
 RECEIPT_EVIDENCE = ("EV-STRUCTURE", "EV-DESIGN-COMPILE", "EV-DESIGN-SOURCE")
 TEST_METHOD = re.compile(r"@Test\b(?:\s*@\w+(?:\([^)]*\))?)*\s*(?:public\s+|protected\s+)?void\s+(\w+)\s*\(")
@@ -104,6 +108,21 @@ def load_strict(path: Path):
     return json.loads(text, object_pairs_hook=_reject_duplicates, parse_constant=_reject_constant)
 
 
+def matches_type(value, expected) -> bool:
+    if isinstance(expected, list):
+        item_type = expected[0]
+        return isinstance(value, list) and all(matches_type(item, item_type) for item in value)
+    if expected is int:
+        return type(value) is int
+    return isinstance(value, expected)
+
+
+def type_name(expected) -> str:
+    if isinstance(expected, list):
+        return f"list of {type_name(expected[0])} values"
+    return {str: "string", dict: "object", int: "integer"}.get(expected, expected.__name__)
+
+
 # ---------------------------------------------------------------- structure rules
 
 def check_spec(root: Path) -> list[dict]:
@@ -118,9 +137,12 @@ def check_spec(root: Path) -> list[dict]:
         fail("S001", "/", f"strict parse failed: {error}")
         return findings
 
-    for key, kind in REQUIRED_TOP.items():
-        if not isinstance(spec.get(key), kind):
-            fail("S003", f"/{key}", f"missing or not {kind.__name__}")
+    if not isinstance(spec, dict):
+        fail("S003", "/", "document is not an object")
+        return findings
+    for key, expected in REQUIRED_TOP.items():
+        if key not in spec or not matches_type(spec[key], expected):
+            fail("S003", f"/{key}", f"missing or not {type_name(expected)}")
     unknown = sorted(set(spec) - set(REQUIRED_TOP))
     for key in unknown:
         fail("S003", f"/{key}", "unknown top-level field")
@@ -133,13 +155,16 @@ def check_spec(root: Path) -> list[dict]:
         if not isinstance(record, dict):
             fail("S003", pointer, "record is not an object")
             return False
-        for key in sorted(required - set(record)):
+        for key in sorted(set(required) - set(record)):
             fail("S003", f"{pointer}/{key}", "missing required field")
-        for key in sorted(set(record) - required - optional):
+        for key in sorted(set(record) - set(required) - set(optional)):
             fail("S005", f"{pointer}/{key}", "unknown field")
+        for key, expected in {**required, **optional}.items():
+            if key in record and not matches_type(record[key], expected):
+                fail("S003", f"{pointer}/{key}", f"must be {type_name(expected)}")
         return True
 
-    for section, (required, optional) in RECORD_FIELDS.items():
+    for section, (required, optional) in RECORD_SCHEMAS.items():
         for index, record in enumerate(spec[section]):
             fields(record, f"/{section}/{index}", required, optional)
     for index, stage in enumerate(spec["stages"]):
@@ -148,8 +173,8 @@ def check_spec(root: Path) -> list[dict]:
             if not isinstance(bindings, list):
                 continue
             for binding_index, binding in enumerate(bindings):
-                fields(binding, f"/stages/{index}/{gate}/{binding_index}", STAGE_BINDING_FIELDS, set())
-    fields(spec["receipt_identity"], "/receipt_identity", RECEIPT_IDENTITY_FIELDS, set())
+                fields(binding, f"/stages/{index}/{gate}/{binding_index}", STAGE_BINDING_SCHEMA, {})
+    fields(spec["receipt_identity"], "/receipt_identity", RECEIPT_IDENTITY_SCHEMA, {})
     for key, value in spec["decisions"].items():
         if not isinstance(value, str) or not value.strip():
             fail("S003", f"/decisions/{key}", "decision value must be a nonempty string")
@@ -160,7 +185,8 @@ def check_spec(root: Path) -> list[dict]:
     for index, record in enumerate(spec["evidence"]):
         if isinstance(record, dict) and record.get("kind") not in EVIDENCE_KINDS:
             fail("S003", f"/evidence/{index}/kind", f"kind must be one of {sorted(EVIDENCE_KINDS)}")
-    if any(f["rule"] == "S003" and f["message"] == "record is not an object" for f in findings):
+    if findings:
+        findings.sort(key=lambda finding: (finding["rule"], finding["pointer"], finding["message"]))
         return findings
 
     def ids(section):
@@ -185,7 +211,7 @@ def check_spec(root: Path) -> list[dict]:
 
     referenced_acceptance = set()
     for index, requirement in enumerate(spec["requirements"]):
-        if not str(requirement.get("statement", "")).strip():
+        if not requirement["statement"].strip():
             fail("S003", f"/requirements/{index}/statement", "empty statement")
         refs = requirement.get("acceptance")
         if not isinstance(refs, list) or not refs:
@@ -204,9 +230,9 @@ def check_spec(root: Path) -> list[dict]:
             test_methods.add(f"{test_file.stem}#{method}")
     for index, acceptance in enumerate(spec["acceptance"]):
         for field in ("when", "then", "target"):
-            if not str(acceptance.get(field, "")).strip():
+            if not acceptance[field].strip():
                 fail("S003", f"/acceptance/{index}/{field}", "empty field")
-        target = str(acceptance.get("target", ""))
+        target = acceptance["target"]
         script = target.split()[0] if target else ""
         if "#" in target:
             if target not in test_methods:
@@ -222,7 +248,7 @@ def check_spec(root: Path) -> list[dict]:
         if requirement not in requirement_ids:
             fail("A001", f"/type_safety_audit/{index}/requirement", f"unresolved requirement {requirement}")
         for field in audit_fields:
-            if not str(row.get(field, "")).strip():
+            if not row[field].strip():
                 fail("A002", f"/type_safety_audit/{index}/{field}", "empty audit field")
     for requirement in sorted(requirement_ids):
         if audit_counts.get(requirement, 0) != 1:
@@ -253,7 +279,7 @@ def check_spec(root: Path) -> list[dict]:
     matrix_keys = set()
     for index, row in enumerate(spec["operation_matrix"]):
         for field in ("operation", "phase", "result", "next_phase"):
-            if not str(row.get(field, "")).strip():
+            if not row[field].strip():
                 fail("M001", f"/operation_matrix/{index}/{field}", "empty matrix field")
         key = (row.get("operation"), row.get("phase"), row.get("precondition"))
         if key in matrix_keys:
@@ -262,7 +288,7 @@ def check_spec(root: Path) -> list[dict]:
 
     for index, row in enumerate(spec["null_boundary_matrix"]):
         for field in ("operation", "null_input", "expected"):
-            if not str(row.get(field, "")).strip():
+            if not row[field].strip():
                 fail("N001", f"/null_boundary_matrix/{index}/{field}", "empty null-boundary field")
 
     for field in RECEIPT_IDENTITY:
@@ -297,6 +323,12 @@ def sha256_bytes(data: bytes) -> str:
 
 def sha256_file(path: Path) -> str:
     return sha256_bytes(path.read_bytes())
+
+
+def evidence_input_hashes(root: Path) -> dict[str, str]:
+    paths = [CHECKER]
+    paths += [str(path.relative_to(root)) for path in (root / TEST_DIR).glob("*.java")]
+    return {name: sha256_file(root / name) for name in sorted(set(paths))}
 
 
 def run_tool(command: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess:
@@ -349,6 +381,7 @@ def build_receipt(root: Path) -> dict:
             "javac": (javac_version.stdout + javac_version.stderr).strip(),
             "release": "21",
         },
+        "evidence_input_hashes": evidence_input_hashes(root),
         "evidence_hashes": {key: sha256_bytes(canonical(value)) for key, value in evidence.items()},
         "status": "PASS" if all(value["status"] == "PASS" for value in evidence.values()) else "FAIL",
         "evidence": evidence,
@@ -389,6 +422,11 @@ def verify_receipt(root: Path, receipt_path: Path) -> list[dict]:
         statuses = [item.get("status") if isinstance(item, dict) else None for item in evidence.values()]
         if (stored["status"] == "PASS") != all(status == "PASS" for status in statuses):
             mismatches.append({"field": "evidence", "message": "receipt status disagrees with evidence statuses"})
+    current_inputs = evidence_input_hashes(root)
+    if stored["evidence_input_hashes"] != current_inputs:
+        mismatches.append({"field": "evidence_input_hashes", "message": "changed since receipt",
+                           "diff": diff(stored["evidence_input_hashes"], current_inputs)})
+        return mismatches
     current = build_receipt(root)
     for field in RECEIPT_IDENTITY:
         if stored[field] != current[field]:
@@ -407,7 +445,7 @@ def diff(old, new):
 # ---------------------------------------------------------------- selftest
 
 def copy_basis(root: Path, target: Path) -> None:
-    paths = [SPEC, DESIGN, str(Path(__file__).resolve().relative_to(REPO_ROOT))]
+    paths = [SPEC, DESIGN, CHECKER]
     paths += [name for name in CONFIG_FILES if (root / name).is_file()]
     paths += [str(p.relative_to(root)) for p in (root / SOURCE_DIR).glob("*.java")]
     paths += [str(p.relative_to(root)) for p in (root / TEST_DIR).glob("*.java")]
@@ -443,6 +481,22 @@ def selftest(root: Path) -> list[dict]:
         receipt_path.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
         clean = verify_receipt(copy, receipt_path)
         record("unchanged basis verifies", not clean, clean)
+
+        checker = copy / CHECKER
+        original = checker.read_text(encoding="utf-8")
+        checker.write_text(original + "\n# altered without changing output\n", encoding="utf-8")
+        altered = verify_receipt(copy, receipt_path)
+        record("altered checker input hash is rejected",
+               any(m["field"] == "evidence_input_hashes" for m in altered), altered)
+        checker.write_text(original, encoding="utf-8")
+
+        test_source = sorted((copy / TEST_DIR).glob("*.java"))[0]
+        original = test_source.read_text(encoding="utf-8")
+        test_source.write_text(original + "\n// altered without changing targets\n", encoding="utf-8")
+        altered = verify_receipt(copy, receipt_path)
+        record("altered target-discovery input hash is rejected",
+               any(m["field"] == "evidence_input_hashes" for m in altered), altered)
+        test_source.write_text(original, encoding="utf-8")
 
         source = sorted((copy / SOURCE_DIR).glob("*.java"))[0]
         original = source.read_text(encoding="utf-8")
@@ -506,6 +560,14 @@ def selftest(root: Path) -> list[dict]:
                       lambda spec: spec["acceptance"][0].pop("then"), "S003")
         rejected_spec("helper method is not an acceptance test target",
                       lambda spec: spec["acceptance"][0].update({"target": "RunLifecycleTest#await"}), "T002")
+        rejected_spec("stage entry with wrong type is rejected",
+                      lambda spec: spec["stages"][0].update({"entry": "x"}), "S003")
+        rejected_spec("non-object stage binding is rejected",
+                      lambda spec: spec["stages"][0]["entry"].__setitem__(0, "x"), "S003")
+        rejected_spec("numeric matrix field is rejected",
+                      lambda spec: spec["operation_matrix"][0].update({"result": 7}), "S003")
+        rejected_spec("non-string acceptance field is rejected",
+                      lambda spec: spec["acceptance"][0].update({"then": ["x"]}), "S003")
 
         record("scratch roots stay under .agent-work",
                all(Path(p).resolve().is_relative_to(WORK_PARENT.resolve()) for p in (scratch, *SCRATCH_ROOTS_SEEN)),

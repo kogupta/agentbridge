@@ -4,13 +4,13 @@ Append-only. Rounds are in chronological order. Add a new round or a Resolution 
 
 ## Current state
 
-- Review status: TARGETED_GATE requested (round 4 addressed; see "Round 4 — Resolution")
-- Latest round: 4 (openai-codex/gpt-5.6-sol), addressed on 2026-09-14
-- Open Blockers: 0 pending targeted gate
-- Open Majors: 0 pending targeted gate
+- Review status: FINAL_GATE_PASS
+- Latest round: 4, targeted recheck passed on 2026-09-14
+- Open Blockers: 0
+- Open Majors: 0
 - Deferred Minors/Nits: 1 (round 3 N-003)
-- Frozen basis: CURRENT for rows outside the changed ones listed in the resolution
-- Next permitted action: TARGETED_GATE by a fresh reviewer. Regenerate and verify the S1 receipt first.
+- Frozen basis: CURRENT
+- Next permitted action: S3 implementation qualification
 
 ## Round 1
 
@@ -826,6 +826,43 @@ Review rounds: 4
 Stop reason: R4-B-001, R4-B-002, R4-M-001, R4-M-002 and R4-M-003 remain open
 Next permitted action: ADDRESS_FINDINGS
 
+## Round 4 — Address resolution and targeted recheck
+
+This section closes only R4-B-003 and R4-M-004 against the existing Round 4 frozen basis. It does not reopen the exhaustive review. The earlier Round 4 peer agreement remains applicable: primary `openai-codex/gpt-5.6-sol`, independent peer none, zero peer exchanges.
+
+- **R4-B-003 — Resolved.** Receipt identity now includes `evidence_input_hashes` for `scripts/native-spec/check_slice.py` and every Java test source read for acceptance-target discovery. Verification compares these hashes before rebuilding evidence. The receipt digest therefore changes when either the validator or a target-discovery input changes, even when the resulting structural evidence remains `PASS`. Selftests alter the copied checker and copied target test source independently and require verification rejection. `spec.json` declares `evidence_input_hashes` in `receipt_identity` and `EV-RECEIPT`.
+- **R4-M-004 — Resolved.** The checker now applies finite typed schemas to every top-level and nested normative record before semantic traversal. Wrong record containers, list elements, scalar types and nulls produce deterministic structural findings; semantic checks do not traverse structurally invalid rows. Normative values are no longer accepted through string coercion. Selftests cover a string stage-entry container, non-object stage binding, numeric operation-matrix field and non-string acceptance field.
+
+### Targeted recheck evidence
+
+| Check | Result |
+|---|---|
+| `python3 scripts/native-spec/check_slice.py check` | PASS, no findings |
+| `python3 scripts/native-spec/check_slice.py selftest` | 24/24 PASS, including checker drift, target-source drift and four wrong-type cases |
+| `python3 scripts/native-spec/check_slice.py receipt` | PASS; Java 21 declaration compile evidence passed; digest `f29d9268d3fe63bbda1e8dc50c0572a8b61d9a095c6c08d27306a27248321d29` |
+| `python3 scripts/native-spec/check_slice.py verify --receipt .agent-work/native-agent-docs/lifecycle-admission/s1-receipt.json` | PASS, no mismatches |
+| `RunLifecycleTest` Gradle run configuration | PASS, exit 0 |
+| IDE incremental build | PASS, zero build errors |
+| IDE lint for changed checker and neighboring lifecycle files | PASS, no reported problems |
+| Changed-file boundary | `review.md`, `spec.json`, `check_slice.py`; no untracked files |
+
+The new evidence closes the two failed frozen rows: S1 exact-basis identity and LC-012 malformed-spec grammar. The receipt binds its evidence generator and target-discovery inputs. Typed structural validation rejects malformed nested values before semantic access. No lifecycle behavior, architecture, issue scope or stage boundary changed, so the frozen basis remains current.
+
+Address status: COMPLETE
+Implementation review status: FINAL_GATE_PASS
+Reviewer checklist: COMPLETE
+Frozen basis: CURRENT
+Peer agreement: openai-codex/gpt-5.6-sol + none
+Peer exchanges used: 0
+Open Blockers: 0
+Open Majors: 0
+Deferred Minors/Nits: 1 (round-3 N-003)
+Verification: PASS
+Final gate: PASS
+Review rounds: 4
+Stop reason: all Round 4 Blocker and Major rows pass; deterministic targeted gate reached terminal success
+Next permitted action: IMPLEMENT_NEXT_STAGE (S3 implementation qualification)
+
 ## Round 4 — Resolution
 
 Appended after the round-4 findings. Round-4 text above is unchanged.
@@ -906,3 +943,111 @@ Changed rows for the targeted gate: driver obligations (`design.md` Scope, `Effe
 - Final gate: FAIL (targeted gate not yet run)
 - Stop reason: awaiting targeted gate
 - Next permitted action: TARGETED_GATE
+
+## Round 4 — Targeted final gate
+
+Basis: the clean `native-agent-workflow` tree containing the Round 4 resolution. The Round 4 peer agreement remains applicable: primary `openai-codex/gpt-5.6-sol`, independent peer none, zero peer exchanges. This is the bounded targeted gate, not another exhaustive review.
+
+### Disposition verification
+
+- **R4-B-001 — PASS.** `product.md:247`, `design.md:13`, `Effect.java:6-14` and `spec.json:291-297` now require one policy: an unexpected throwable records `FAILED_AFTER_START`; the driver starts no later call or provider request, stops the run, and finishes after cleanup. The documented Pi difference is explicit.
+- **R4-B-002 — PASS for stored-payload authentication.** `verify_receipt` requires the exact three S1 evidence IDs, recomputes every payload hash, checks aggregate status, and compares current identity fields. Selftests cover altered, missing and extra payloads and a forged evidence hash. A separate exact-basis defect remains as R4-B-003.
+- **R4-M-001 — PASS for unknown-field and target-kind enforcement.** Fixed field sets cover every current normative record and stage binding; `S005` rejects nested unknown fields; acceptance methods must match an `@Test` declaration. A separate malformed-type defect remains as R4-M-004.
+- **R4-M-002 — PASS by source trace.** The operation-matrix checklist maps all 24 rows to assertions. The changed tests cover blank IDs, unknown calls without invocation or mutation, STOPPING/CLOSING batch rejection, repeated Stop, AWT pre-settlement start/finish rejection, and IDLE/CLOSED outcomes. Independent execution was unavailable in this gate as recorded below.
+- **R4-M-003 — PASS.** Both receipt compilation and selftest use `scratch_dir`, whose parent is `.agent-work/native-agent-spec/`; the selftest checks every recorded scratch root.
+- **R4-N-001 — PASS.** Missing and malformed receipts become `ToolError`; `main` maps expected read/parse errors to JSON `ERROR` and exit 2.
+
+### New findings
+
+#### R4-B-003 — the receipt does not bind the evidence implementation
+
+- [ ] **Severity: Blocker.**
+- **Location:** `scripts/native-spec/check_slice.py:32-49`, `:340-356`, `:392-395`, `:409-417`; `spec.json` LC-012.
+- **Problem:** `check_slice.py` is copied into selftest bases but is absent from every receipt identity field. `configuration_identity.files` contains only the five Gradle/configuration files. The test sources inspected by `check_spec` are absent too. `EV-STRUCTURE` stores only a command label, findings and status.
+- **Concrete trace:** generate a receipt, then change `RECORD_FIELDS`, `TEST_METHOD`, or another checker rule without changing the currently valid spec's empty finding list. `build_receipt` produces the same structure payload, evidence hash, spec/design/declaration hashes and configuration identity. `verify_receipt` compares only those fields, so the old receipt still verifies under a different checker implementation. The same omission applies to acceptance-target input files when their change leaves the discovered target set equivalent.
+- **Why it matters:** LC-012 and the frozen S1 row require exact frozen inputs. A receipt that survives a validator change is not an exact-basis receipt. This is the same gate property that made R4-B-002 a Blocker.
+- **Expected correction:** add an explicit evidence-input identity to the receipt digest. At minimum bind `scripts/native-spec/check_slice.py` and the test source files consumed for target discovery, alongside every other file read to generate S1 evidence. Verification must compare that identity before rebuilding evidence.
+- **Test requirement:** generate a receipt in a copied basis, alter the copied checker and separately alter a target test source without changing current PASS output, then require verification to reject the changed input identity.
+
+### Escape analysis — R4-B-003
+
+- New material evidence since Round 4: no.
+- Frozen-basis row that should have caught it: S1 exact-basis receipt; `check_slice.py` change-impact row; receipt weak-implementer trace.
+- Why Round 4 marked that row complete: the trace mutated receipt payloads and declared source/configuration files, but treated the checker implementation and target-discovery sources as outside the receipt identity despite listing them in the review scope.
+- Classification: REVIEW_MISS.
+- Required workflow correction: enumerate and hash every evidence-generator input, then add checker/test-source drift to the receipt trace. Round 4 `Reviewer checklist: COMPLETE` is superseded by `INCOMPLETE` below.
+
+#### R4-M-004 — nested field types are neither rejected nor handled safely
+
+- [ ] **Severity: Major.**
+- **Location:** `scripts/native-spec/check_slice.py:132-163`, `:186-266`, `:545-570`; `workflow.md:107-123`.
+- **Problem:** the new `fields` helper checks only record shape and key presence. Most field value types are unchecked. Several later semantic loops assume lists, dictionaries, or strings.
+- **Concrete traces:** setting `stages[0].entry` to the string `"x"` passes the only container guard at lines 147-151 without a finding; the later stage loop iterates the string and calls `binding.get`, raising `AttributeError`, which `main` does not translate. Setting an operation-matrix `result` to integer `7` passes because `str(7).strip()` is nonempty. Both violate the documented typed, fail-closed schema behavior.
+- **Why it matters:** malformed normative input can crash the gate or be accepted with the wrong type instead of producing deterministic diagnostics.
+- **Expected correction:** define required value types with the per-record field schema; validate containers and element types before semantic traversal; stop semantic traversal for structurally invalid rows. Do not coerce normative values with `str(...)` for validation.
+- **Test requirement:** add selftests for a wrong stage entry container, a non-object stage binding, a numeric matrix field, and a non-string acceptance field. Require deterministic `S003` findings without traceback.
+
+### Escape analysis — R4-M-004
+
+- New material evidence since Round 4: no.
+- Frozen-basis row that should have caught it: LC-012 strict structure and behavior grammar `malformed spec`.
+- Why Round 4 marked that row complete: it tested unknown and missing keys but did not mutate any nested value type or trace structurally invalid input through the semantic loops.
+- Classification: REVIEW_MISS.
+- Required workflow correction: add wrong-type mutations to the finite malformed-spec row and keep structural validation ahead of reference/semantic checks. Round 4 `Reviewer checklist: COMPLETE` is superseded by `INCOMPLETE` below.
+
+### Verification observed
+
+| Check | Result |
+|---|---|
+| Generated S1 receipt supplied by the user | Present; status `PASS`, compile exit 0, digest `5a888317…0759` |
+| IDE incremental project build | PASS |
+| IDE diagnostics for checker, lifecycle test and `Effect` | No reported warning/error items |
+| Focused `RunLifecycleTest` run configuration | Tool failed with HTTP 404 before launch; reported |
+| Test target `RunLifecycleTest` fallback | Returned success with `noTestsFound=true`, 0 tests; rejected as evidence and reported |
+| `Plugin-Core Tests (Clean)` fallback | Exit 1 with no output or test counts; rejected as evidence and reported |
+| Repository state before this ledger append | clean on `native-agent-workflow` |
+
+The user's `receipt` execution and the generated file prove the current strict check, Java 21 declaration compilation and signature extraction passed. They do not execute `selftest` or lifecycle behavior tests. The targeted gate therefore lacks independent focused-test proof in addition to the two open findings.
+
+Address status: COMPLETE for R4-B-001, R4-B-002, R4-M-001, R4-M-002, R4-M-003 and R4-N-001; ADDRESS_FINDINGS for R4-B-003 and R4-M-004
+Implementation review status: FINAL_GATE_FAIL
+Reviewer checklist: INCOMPLETE
+Frozen basis: CURRENT
+Peer agreement: openai-codex/gpt-5.6-sol + none
+Peer exchanges used: 0
+Open Blockers: 1
+Open Majors: 1
+Deferred Minors/Nits: 1 (round-3 N-003)
+Verification: FAIL
+Final gate: FAIL
+Review rounds: 4
+Stop reason: R4-B-003 and R4-M-004 remain open; independent focused tests did not execute
+Next permitted action: ADDRESS_FINDINGS
+
+## S3 qualification attempt
+
+Executed after the Round 4 targeted gate passed. This records reachable S3 evidence and the remaining environment boundary; it does not claim DONE while surface inspection and the semantic commit are unavailable.
+
+| Check | Result |
+|---|---|
+| Focused lifecycle tests | PASS: `RunLifecycleTest`, 13 tests, 0 failures, 0 errors |
+| Required AWT smoke | PASS: `RunLifecycleTest#awtAdmissionSmoke` included in the focused run |
+| Plugin build | PASS: `Build Plugin ZIP`, `:plugin-core:buildPlugin`, exit 0 |
+| Python S1 checks | PASS: `check` no findings; `selftest` 24/24; `receipt` digest `f29d9268d3fe63bbda1e8dc50c0572a8b61d9a095c6c08d27306a27248321d29`; `verify` no mismatches |
+| IDE diagnostics | No errors reported; one existing unused `Batch.Snapshot.isSettled` warning was returned |
+| IDE semantic surface inspection | BLOCKED: mounted project-outline and symbol routes returned the documented-route error requiring unavailable project-bound `ide_*` navigation; issue reported |
+| Semantic Git commit | BLOCKED: no native Git write tool is mounted; the three intended files remain uncommitted |
+
+S3 behavioral and build evidence is green. The feature cannot be marked `DONE` under `workflow.md`: surface evidence and the repository-authorized semantic commit remain outstanding.
+
+S3 status: BLOCKED
+Implementation review status: FINAL_GATE_PASS
+Reviewer checklist: COMPLETE
+Frozen basis: CURRENT
+Open Blockers: 0
+Open Majors: 0
+Deferred Minors/Nits: 1 (round-3 N-003)
+Verification: PASS for executed checks; S3 incomplete
+Final gate: PASS
+Stop reason: S3 surface inspection and semantic commit unavailable in the mounted environment
+Next permitted action: COMPLETE_S3_SURFACE_AND_COMMIT
