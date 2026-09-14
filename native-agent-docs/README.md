@@ -12,6 +12,8 @@ Each fact has one home. If two files seem to say the same thing, the file named 
 | `domain-run-driver/spec.json` | Canonical DR-001–DR-020, AC-001–AC-018, type-safety audit, operation matrix, null boundaries, evidence IDs, stage bindings. |
 | `domain-run-driver/design.md` | Java and Kotlin surface, ownership, prompt-cache algorithm, retry and limit precedence. References `spec.json` for tables. |
 | `domain-run-driver/review.md` | Append-only review ledger: current state, specification, design and implementation review rounds 1–13. |
+| `semantic-reads/spec.json` | Canonical SR-001–SR-026, AC-001–AC-024, type-safety audit, operation matrix, null boundaries, evidence IDs, stage bindings. |
+| `semantic-reads/review.md` | Append-only review ledger: current state and review rounds. |
 
 Reading order for implementation work on a slice: `<slice>/review.md` current state → `spec.json` → `design.md` → `workflow.md` feature slices. Read `product.md` when a finding touches product scope or Pi fidelity.
 

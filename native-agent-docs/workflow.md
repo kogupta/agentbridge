@@ -69,6 +69,8 @@ Generated receipts and packets are disposable outputs tied to content hashes, ke
 
 When a second feature exists, move shared decisions from `product.md` into `decisions.json` (key, primitive type, allowed values, selected value, rationale, evidence IDs; no feature-level override or implicit default). Until then, `product.md` Decisions is the registry.
 
+Deferred by owner decision (2026-09-15): two features exist, but the migration waits. The frozen `lifecycle-admission` and `domain-run-driver` specs reference `REF:product.md#KEY`, and moving the registry would change their digests and reopen their gates. New specs use the same `REF:product.md#KEY` form. Migrate all specs together when a gate reopens for another reason or the owner schedules the migration.
+
 Feature fields when the format generalizes:
 
 | Field | Content |
@@ -211,6 +213,7 @@ A slice's stage bindings are in its `spec.json`. Its state is only the Current s
 |---|---|---|
 | `lifecycle-admission/` | 0 | `plugin-core/.../nativeagent/lifecycle/` |
 | `domain-run-driver/` | 1 | `plugin-core/.../nativeagent/run/` (Java and Kotlin) |
+| `semantic-reads/` | 2 | Not installed (specification draft) |
 
 ## Lifecycle/admission slice stages
 
