@@ -1051,3 +1051,30 @@ Verification: PASS for executed checks; S3 incomplete
 Final gate: PASS
 Stop reason: S3 surface inspection and semantic commit unavailable in the mounted environment
 Next permitted action: COMPLETE_S3_SURFACE_AND_COMMIT
+
+## S3 restart recheck
+
+After the OMP restart and IDEA Facade configuration update, CLI Git availability was verified. The prior S3 record's commit blocker is superseded by this append-only correction.
+
+| Check | Result |
+|---|---|
+| CLI Git status | PASS: branch `native-agent-workflow`, clean after commit |
+| Semantic commit | PASS: `92afd2b0e688a8305ffd781cd019a5456ab3858c`, bot author and committer |
+| Focused lifecycle tests | PASS: `RunLifecycleTest`, 13 tests, 0 failures, 0 errors |
+| IDEA Facade status | Both `idea-index` and `idea-native` endpoints report available; semantic composite routes still return the unavailable `ide_*` routing message |
+| Semantic class/symbol lookup | BLOCKED: `find` and `symbol` still return the routing message instead of results |
+| Whole-file Java read | BLOCKED: `read_batch` still returns only line 1 for an omitted-range `RunLifecycle.java` read |
+
+S3 remains blocked only on semantic surface evidence. Git availability and commit completion are no longer blockers.
+
+S3 status: BLOCKED
+Implementation review status: FINAL_GATE_PASS
+Reviewer checklist: COMPLETE
+Frozen basis: CURRENT
+Open Blockers: 0
+Open Majors: 0
+Deferred Minors/Nits: 1 (round-3 N-003)
+Verification: PASS for executed checks; S3 surface evidence incomplete
+Final gate: PASS
+Stop reason: semantic navigation and complete source-read routes remain unavailable after restart; Git is available via CLI
+Next permitted action: FIX_IDEA_FACADE_SEMANTIC_ROUTES
