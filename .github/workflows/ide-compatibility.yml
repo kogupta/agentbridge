@@ -62,8 +62,7 @@ jobs:
           cache-disabled: true
 
       - name: Build plugin
-        # Skip buildChatUi — the JS/CSS bundle is not needed for API compatibility checks.
-        run: gradle :plugin-core:buildPlugin --no-daemon --quiet -x :plugin-core:buildChatUi
+        run: gradle :plugin-core:buildPlugin --no-daemon --quiet
 
       - name: Upload plugin distribution
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
@@ -137,7 +136,6 @@ jobs:
           --no-daemon
           -PverifyIde=${{ matrix.ide.id }}
           -x :plugin-core:buildPlugin
-          -x :plugin-core:buildChatUi
 
       - name: Show disk space after verification
         if: always()

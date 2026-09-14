@@ -34,30 +34,3 @@ updates:
       default-days: 7
       semver-major-days: 30
 
-  - package-ecosystem: "npm"
-    directory: "/plugin-core/chat-ui"
-    schedule:
-      interval: "weekly"
-    labels:
-      - "dependencies"
-    groups:
-      chat-ui-npm:
-        patterns:
-          - "*"
-    cooldown:
-      default-days: 7
-      semver-major-days: 30
-
-  - package-ecosystem: "npm"
-    directory: "/plugin-core/js-tests"
-    schedule:
-      interval: "weekly"
-    labels:
-      - "dependencies"
-    groups:
-      js-tests-npm:
-        patterns:
-          - "*"
-    cooldown:
-      default-days: 7
-      semver-major-days: 30
