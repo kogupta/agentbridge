@@ -17,9 +17,9 @@
       <module name="agentbridge.mcp-server" options="-parameters" />
       <module name="agentbridge.mcp-server.main" options="-parameters" />
       <module name="agentbridge.mcp-server.test" options="-parameters" />
-      <module name="agentbridge.plugin-core" options="-parameters -Xlint:deprecation" />
-      <module name="agentbridge.plugin-core.main" options="-parameters -Xlint:deprecation" />
-      <module name="agentbridge.plugin-core.test" options="-parameters -Xlint:deprecation" />
+      <module name="agentbridge.plugin-core" options="-parameters -parameters" />
+      <module name="agentbridge.plugin-core.main" options="-parameters -parameters" />
+      <module name="agentbridge.plugin-core.test" options="-parameters -parameters" />
       <module name="agentbridge.plugin-experimental" options="-parameters -Xlint:deprecation" />
       <module name="agentbridge.plugin-experimental.main" options="-parameters -Xlint:deprecation" />
       <module name="agentbridge.plugin-experimental.test" options="-parameters -Xlint:deprecation" />

@@ -33,15 +33,15 @@ class RunLifecycleTest {
 
     @Test
     void validatedImmutableBatch() {
-        CallId first = new CallId("first");
-        CallId duplicate = new CallId("duplicate");
-        assertThrows(IllegalArgumentException.class, () -> CallBatch.of(List.of()));
-        assertThrows(NullPointerException.class, () -> CallBatch.of(null));
-        assertThrows(IllegalArgumentException.class, () -> CallBatch.of(List.of(duplicate, duplicate)));
-        assertThrows(NullPointerException.class, () -> CallBatch.of(Arrays.asList(first, null)));
+        Call.Id first = new Call.Id("first");
+        Call.Id duplicate = new Call.Id("duplicate");
+        assertThrows(IllegalArgumentException.class, () -> Call.Batch.of(List.of()));
+        assertThrows(NullPointerException.class, () -> Call.Batch.of(null));
+        assertThrows(IllegalArgumentException.class, () -> Call.Batch.of(List.of(duplicate, duplicate)));
+        assertThrows(NullPointerException.class, () -> Call.Batch.of(Arrays.asList(first, null)));
 
         var input = new java.util.ArrayList<>(List.of(first));
-        CallBatch batch = CallBatch.of(input);
+        Call.Batch batch = Call.Batch.of(input);
         input.clear();
         assertEquals(List.of(first), batch.calls());
         assertThrows(UnsupportedOperationException.class, () -> batch.calls().clear());
@@ -51,9 +51,9 @@ class RunLifecycleTest {
     void orderedExclusiveExecutionAndDuplicateAdmission() throws Exception {
         RunLifecycle lifecycle = new RunLifecycle();
         RunHandle run = startedRun(lifecycle);
-        CallId first = new CallId("first");
-        CallId second = new CallId("second");
-        BatchHandle batch = begunBatch(lifecycle, run, first, second);
+        Call.Id first = new Call.Id("first");
+        Call.Id second = new Call.Id("second");
+        Batch.Handle batch = begunBatch(lifecycle, run, first, second);
         CountDownLatch entered = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
         AtomicInteger firstEntries = new AtomicInteger();
@@ -86,8 +86,8 @@ class RunLifecycleTest {
     void stopBeforeQueuedEffect() throws Exception {
         RunLifecycle lifecycle = new RunLifecycle();
         RunHandle run = startedRun(lifecycle);
-        CallId call = new CallId("queued");
-        BatchHandle batch = begunBatch(lifecycle, run, call);
+        Call.Id call = new Call.Id("queued");
+        Batch.Handle batch = begunBatch(lifecycle, run, call);
         CountDownLatch queueGate = new CountDownLatch(1);
         AtomicInteger entries = new AtomicInteger();
 
@@ -98,10 +98,10 @@ class RunLifecycleTest {
             RunLifecycle.StopResult stopped = lifecycle.stop(run);
             queueGate.countDown();
             assertEquals(0, entries.get());
-            assertEquals(LifecyclePhase.STOPPING, stoppedPhase(stopped));
+            assertEquals(Lifecycle.Phase.STOPPING, stoppedPhase(stopped));
             assertEquals(new RunLifecycle.ExecutionResult.Rejected(RunLifecycle.ExecutionRejection.RUN_NOT_ACCEPTING_EFFECTS),
                 queued.get(5, TimeUnit.SECONDS));
-            assertEquals(CallStatus.CANCELLED_BEFORE_START, batchStatus(lifecycle, batch, call));
+            assertEquals(Call.Status.CANCELLED_BEFORE_START, batchStatus(lifecycle, batch, call));
         }
     }
 
@@ -109,9 +109,9 @@ class RunLifecycleTest {
     void stopDuringEffect() throws Exception {
         RunLifecycle lifecycle = new RunLifecycle();
         RunHandle run = startedRun(lifecycle);
-        CallId first = new CallId("first");
-        CallId second = new CallId("second");
-        BatchHandle batch = begunBatch(lifecycle, run, first, second);
+        Call.Id first = new Call.Id("first");
+        Call.Id second = new Call.Id("second");
+        Batch.Handle batch = begunBatch(lifecycle, run, first, second);
         CountDownLatch entered = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
 
@@ -127,8 +127,8 @@ class RunLifecycleTest {
             assertEquals(new RunLifecycle.FinishRunResult.Rejected(RunLifecycle.FinishRejection.BATCH_UNSETTLED), lifecycle.finishRun(run));
             release.countDown();
             assertInstanceOf(RunLifecycle.ExecutionResult.Executed.class, executing.get(5, TimeUnit.SECONDS));
-            assertEquals(CallStatus.COMPLETED, batchStatus(lifecycle, batch, first));
-            assertEquals(CallStatus.CANCELLED_BEFORE_START, batchStatus(lifecycle, batch, second));
+            assertEquals(Call.Status.COMPLETED, batchStatus(lifecycle, batch, first));
+            assertEquals(Call.Status.CANCELLED_BEFORE_START, batchStatus(lifecycle, batch, second));
             assertInstanceOf(RunLifecycle.FinishRunResult.Finished.class, lifecycle.finishRun(run));
         }
     }
@@ -137,9 +137,9 @@ class RunLifecycleTest {
     void terminalAccounting() {
         assertTerminalStatus(() -> { });
         RuntimeException runtime = new RuntimeException("runtime");
-        assertTerminalStatus(CallStatus.FAILED_AFTER_START, () -> { throw runtime; }, runtime);
+        assertTerminalStatus(Call.Status.FAILED_AFTER_START, () -> { throw runtime; }, runtime);
         AssertionError error = new AssertionError("error");
-        assertTerminalStatus(CallStatus.FAILED_AFTER_START, () -> { throw error; }, error);
+        assertTerminalStatus(Call.Status.FAILED_AFTER_START, () -> { throw error; }, error);
     }
 
     @Test
@@ -148,18 +148,18 @@ class RunLifecycleTest {
         RunLifecycle secondLifecycle = new RunLifecycle();
         RunHandle firstRun = startedRun(firstLifecycle);
         RunHandle secondRun = startedRun(secondLifecycle);
-        CallId firstCall = new CallId("first");
-        BatchHandle firstBatch = begunBatch(firstLifecycle, firstRun, firstCall);
+        Call.Id firstCall = new Call.Id("first");
+        Batch.Handle firstBatch = begunBatch(firstLifecycle, firstRun, firstCall);
 
         assertEquals(new RunLifecycle.BeginBatchResult.Rejected(RunLifecycle.BatchRejection.STALE_RUN),
-            secondLifecycle.beginBatch(firstRun, CallBatch.of(List.of(new CallId("foreign")))));
+            secondLifecycle.beginBatch(firstRun, Call.Batch.of(List.of(new Call.Id("foreign")))));
         lifecycleExecute(firstLifecycle, firstBatch, firstCall);
-        BatchSnapshot captured = availableSnapshot(firstLifecycle.batchSnapshot(firstBatch));
-        CallId secondCall = new CallId("second");
-        BatchHandle secondBatch = begunBatch(firstLifecycle, firstRun, secondCall);
+        Batch.Snapshot captured = availableSnapshot(firstLifecycle.batchSnapshot(firstBatch));
+        Call.Id secondCall = new Call.Id("second");
+        Batch.Handle secondBatch = begunBatch(firstLifecycle, firstRun, secondCall);
         assertEquals(new RunLifecycle.BatchSnapshotResult.Rejected(RunLifecycle.BatchSnapshotRejection.STALE_BATCH),
             firstLifecycle.batchSnapshot(firstBatch));
-        assertEquals(List.of(new CallSnapshot(firstCall, CallStatus.COMPLETED)), captured.calls());
+        assertEquals(List.of(new Call.Snapshot(firstCall, Call.Status.COMPLETED)), captured.calls());
         assertNotNull(secondRun);
         assertNotNull(secondBatch);
     }
@@ -168,9 +168,9 @@ class RunLifecycleTest {
     void closeDrainsWithoutReopening() throws Exception {
         RunLifecycle lifecycle = new RunLifecycle();
         RunHandle run = startedRun(lifecycle);
-        CallId active = new CallId("active");
-        CallId pending = new CallId("pending");
-        BatchHandle batch = begunBatch(lifecycle, run, active, pending);
+        Call.Id active = new Call.Id("active");
+        Call.Id pending = new Call.Id("pending");
+        Batch.Handle batch = begunBatch(lifecycle, run, active, pending);
         CountDownLatch entered = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
 
@@ -182,11 +182,11 @@ class RunLifecycleTest {
                 }));
             assertTrue(entered.await(5, TimeUnit.SECONDS));
             lifecycle.stop(run);
-            assertEquals(LifecyclePhase.CLOSING, lifecycle.close().phase());
-            assertEquals(LifecyclePhase.CLOSING, lifecycle.close().phase());
+            assertEquals(Lifecycle.Phase.CLOSING, lifecycle.close().phase());
+            assertEquals(Lifecycle.Phase.CLOSING, lifecycle.close().phase());
             release.countDown();
             execution.get(5, TimeUnit.SECONDS);
-            assertEquals(LifecyclePhase.CLOSED, finishedPhase(lifecycle.finishRun(run)));
+            assertEquals(Lifecycle.Phase.CLOSED, finishedPhase(lifecycle.finishRun(run)));
             assertEquals(new RunLifecycle.StartRunResult.Rejected(RunLifecycle.StartRejection.CLOSED), lifecycle.startRun());
         }
     }
@@ -194,21 +194,21 @@ class RunLifecycleTest {
     @Test
     void nullInputDoesNotMutate() {
         RunLifecycle lifecycle = new RunLifecycle();
-        assertThrows(NullPointerException.class, () -> new CallId(null));
-        assertThrows(NullPointerException.class, () -> lifecycle.beginBatch(null, CallBatch.of(List.of(new CallId("x")))));
-        assertThrows(NullPointerException.class, () -> lifecycle.execute(null, new CallId("x"), () -> { }));
+        assertThrows(NullPointerException.class, () -> new Call.Id(null));
+        assertThrows(NullPointerException.class, () -> lifecycle.beginBatch(null, Call.Batch.of(List.of(new Call.Id("x")))));
+        assertThrows(NullPointerException.class, () -> lifecycle.execute(null, new Call.Id("x"), () -> { }));
         assertThrows(NullPointerException.class, () -> lifecycle.stop(null));
         assertThrows(NullPointerException.class, () -> lifecycle.finishRun(null));
         assertThrows(NullPointerException.class, () -> lifecycle.batchSnapshot(null));
-        assertEquals(new LifecycleSnapshot.Idle(), lifecycle.snapshot());
+        assertEquals(Lifecycle.idle(), lifecycle.snapshot());
     }
 
     @Test
     void nonblockingStopAndImmutableSnapshots() throws Exception {
         RunLifecycle lifecycle = new RunLifecycle();
         RunHandle run = startedRun(lifecycle);
-        CallId call = new CallId("call");
-        BatchHandle batch = begunBatch(lifecycle, run, call);
+        Call.Id call = new Call.Id("call");
+        Batch.Handle batch = begunBatch(lifecycle, run, call);
         CountDownLatch entered = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
 
@@ -218,13 +218,13 @@ class RunLifecycleTest {
                 await(release);
             }));
             assertTrue(entered.await(5, TimeUnit.SECONDS));
-            BatchSnapshot before = availableSnapshot(lifecycle.batchSnapshot(batch));
-            assertEquals(CallStatus.EXECUTING, before.calls().getFirst().status());
-            assertEquals(LifecyclePhase.STOPPING, stoppedPhase(lifecycle.stop(run)));
+            Batch.Snapshot before = availableSnapshot(lifecycle.batchSnapshot(batch));
+            assertEquals(Call.Status.EXECUTING, before.calls().getFirst().status());
+            assertEquals(Lifecycle.Phase.STOPPING, stoppedPhase(lifecycle.stop(run)));
             release.countDown();
             execution.get(5, TimeUnit.SECONDS);
-            assertEquals(CallStatus.EXECUTING, before.calls().getFirst().status());
-            assertEquals(CallStatus.COMPLETED, batchStatus(lifecycle, batch, call));
+            assertEquals(Call.Status.EXECUTING, before.calls().getFirst().status());
+            assertEquals(Call.Status.COMPLETED, batchStatus(lifecycle, batch, call));
         }
     }
 
@@ -232,23 +232,23 @@ class RunLifecycleTest {
     void multipleBatchesPreserveIdentity() {
         RunLifecycle lifecycle = new RunLifecycle();
         RunHandle run = startedRun(lifecycle);
-        CallId first = new CallId("first");
-        CallId second = new CallId("second");
-        CallId fresh = new CallId("fresh");
-        BatchHandle firstBatch = begunBatch(lifecycle, run, first, second);
+        Call.Id first = new Call.Id("first");
+        Call.Id second = new Call.Id("second");
+        Call.Id fresh = new Call.Id("fresh");
+        Batch.Handle firstBatch = begunBatch(lifecycle, run, first, second);
         assertEquals(new RunLifecycle.FinishRunResult.Rejected(RunLifecycle.FinishRejection.BATCH_UNSETTLED), lifecycle.finishRun(run));
         lifecycleExecute(lifecycle, firstBatch, first);
         lifecycleExecute(lifecycle, firstBatch, second);
         assertInstanceOf(RunLifecycle.FinishRunResult.Finished.class, lifecycle.finishRun(run));
 
         RunHandle nextRun = startedRun(lifecycle);
-        BatchHandle nextBatch = begunBatch(lifecycle, nextRun, fresh);
+        Batch.Handle nextBatch = begunBatch(lifecycle, nextRun, fresh);
         lifecycleExecute(lifecycle, nextBatch, fresh);
         assertEquals(new RunLifecycle.BeginBatchResult.Rejected(RunLifecycle.BatchRejection.CALL_ID_ALREADY_ACCEPTED),
-            lifecycle.beginBatch(nextRun, CallBatch.of(List.of(fresh, first))));
-        BatchHandle freshBatch = begunBatch(lifecycle, nextRun, new CallId("new"));
-        lifecycleExecute(lifecycle, freshBatch, new CallId("new"));
-        assertEquals(LifecyclePhase.IDLE, finishedPhase(lifecycle.finishRun(nextRun)));
+            lifecycle.beginBatch(nextRun, Call.Batch.of(List.of(fresh, first))));
+        Batch.Handle freshBatch = begunBatch(lifecycle, nextRun, new Call.Id("new"));
+        lifecycleExecute(lifecycle, freshBatch, new Call.Id("new"));
+        assertEquals(Lifecycle.Phase.IDLE, finishedPhase(lifecycle.finishRun(nextRun)));
         assertNotNull(nextBatch);
     }
 
@@ -256,8 +256,8 @@ class RunLifecycleTest {
     void awtAdmissionSmoke() throws Exception {
         RunLifecycle lifecycle = new RunLifecycle();
         RunHandle run = startedRun(lifecycle);
-        CallId call = new CallId("awt");
-        BatchHandle batch = begunBatch(lifecycle, run, call);
+        Call.Id call = new Call.Id("awt");
+        Batch.Handle batch = begunBatch(lifecycle, run, call);
         CountDownLatch edtBlocked = new CountDownLatch(1);
         CountDownLatch releaseEdt = new CountDownLatch(1);
         EventQueue.invokeLater(() -> {
@@ -272,13 +272,13 @@ class RunLifecycleTest {
         releaseEdt.countDown();
         assertEquals(0, entries.get());
         assertEquals(new RunLifecycle.ExecutionResult.Rejected(RunLifecycle.ExecutionRejection.RUN_NOT_ACCEPTING_EFFECTS), queued.get());
-        assertEquals(CallStatus.CANCELLED_BEFORE_START, batchStatus(lifecycle, batch, call));
-        assertEquals(LifecyclePhase.STOPPING, stoppedPhase(stopBefore));
+        assertEquals(Call.Status.CANCELLED_BEFORE_START, batchStatus(lifecycle, batch, call));
+        assertEquals(Lifecycle.Phase.STOPPING, stoppedPhase(stopBefore));
 
         RunLifecycle admittedLifecycle = new RunLifecycle();
         RunHandle admittedRun = startedRun(admittedLifecycle);
-        CallId admittedCall = new CallId("admitted");
-        BatchHandle admittedBatch = begunBatch(admittedLifecycle, admittedRun, admittedCall);
+        Call.Id admittedCall = new Call.Id("admitted");
+        Batch.Handle admittedBatch = begunBatch(admittedLifecycle, admittedRun, admittedCall);
         CountDownLatch effectEntered = new CountDownLatch(1);
         CountDownLatch releaseEffect = new CountDownLatch(1);
         FutureTaskResult admittedResult = new FutureTaskResult();
@@ -287,21 +287,21 @@ class RunLifecycleTest {
             await(releaseEffect);
         })));
         assertTrue(effectEntered.await(5, TimeUnit.SECONDS));
-        assertEquals(LifecyclePhase.STOPPING, stoppedPhase(admittedLifecycle.stop(admittedRun)));
+        assertEquals(Lifecycle.Phase.STOPPING, stoppedPhase(admittedLifecycle.stop(admittedRun)));
         releaseEffect.countDown();
         assertEquals(new RunLifecycle.ExecutionResult.Executed(), admittedResult.get());
-        assertEquals(CallStatus.COMPLETED, batchStatus(admittedLifecycle, admittedBatch, admittedCall));
+        assertEquals(Call.Status.COMPLETED, batchStatus(admittedLifecycle, admittedBatch, admittedCall));
     }
 
     private static void assertTerminalStatus(Effect effect) {
-        assertTerminalStatus(CallStatus.COMPLETED, effect, null);
+        assertTerminalStatus(Call.Status.COMPLETED, effect, null);
     }
 
-    private static void assertTerminalStatus(CallStatus expected, Effect effect, Throwable thrown) {
+    private static void assertTerminalStatus(Call.Status expected, Effect effect, Throwable thrown) {
         RunLifecycle lifecycle = new RunLifecycle();
         RunHandle run = startedRun(lifecycle);
-        CallId call = new CallId("call");
-        BatchHandle batch = begunBatch(lifecycle, run, call);
+        Call.Id call = new Call.Id("call");
+        Batch.Handle batch = begunBatch(lifecycle, run, call);
         if (thrown == null) {
             assertInstanceOf(RunLifecycle.ExecutionResult.Executed.class, lifecycle.execute(batch, call, effect));
         } else {
@@ -317,19 +317,19 @@ class RunLifecycleTest {
         return ((RunLifecycle.StartRunResult.Started) lifecycle.startRun()).run();
     }
 
-    private static BatchHandle begunBatch(RunLifecycle lifecycle, RunHandle run, CallId... calls) {
-        return ((RunLifecycle.BeginBatchResult.Begun) lifecycle.beginBatch(run, CallBatch.of(List.of(calls)))).batch();
+    private static Batch.Handle begunBatch(RunLifecycle lifecycle, RunHandle run, Call.Id... calls) {
+        return ((RunLifecycle.BeginBatchResult.Begun) lifecycle.beginBatch(run, Call.Batch.of(List.of(calls)))).batch();
     }
 
-    private static void lifecycleExecute(RunLifecycle lifecycle, BatchHandle batch, CallId call) {
+    private static void lifecycleExecute(RunLifecycle lifecycle, Batch.Handle batch, Call.Id call) {
         assertInstanceOf(RunLifecycle.ExecutionResult.Executed.class, lifecycle.execute(batch, call, () -> { }));
     }
 
-    private static BatchSnapshot availableSnapshot(RunLifecycle.BatchSnapshotResult result) {
+    private static Batch.Snapshot availableSnapshot(RunLifecycle.BatchSnapshotResult result) {
         return ((RunLifecycle.BatchSnapshotResult.Available) result).snapshot();
     }
 
-    private static CallStatus batchStatus(RunLifecycle lifecycle, BatchHandle batch, CallId call) {
+    private static Call.Status batchStatus(RunLifecycle lifecycle, Batch.Handle batch, Call.Id call) {
         return availableSnapshot(lifecycle.batchSnapshot(batch)).calls().stream()
             .filter(snapshot -> snapshot.call().equals(call))
             .findFirst()
@@ -337,11 +337,11 @@ class RunLifecycleTest {
             .status();
     }
 
-    private static LifecyclePhase stoppedPhase(RunLifecycle.StopResult result) {
+    private static Lifecycle.Phase stoppedPhase(RunLifecycle.StopResult result) {
         return ((RunLifecycle.StopResult.Acknowledged) result).lifecycle().phase();
     }
 
-    private static LifecyclePhase finishedPhase(RunLifecycle.FinishRunResult result) {
+    private static Lifecycle.Phase finishedPhase(RunLifecycle.FinishRunResult result) {
         return ((RunLifecycle.FinishRunResult.Finished) result).lifecycle().phase();
     }
 

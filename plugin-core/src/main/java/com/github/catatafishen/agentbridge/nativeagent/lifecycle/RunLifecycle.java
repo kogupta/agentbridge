@@ -10,30 +10,30 @@ import java.util.Set;
 
 public final class RunLifecycle {
     private final Object ownerKey = new Object();
-    private final Set<CallId> acceptedCallIds = new HashSet<>();
+    private final Set<Call.Id> acceptedCallIds = new HashSet<>();
 
-    private LifecyclePhase phase = LifecyclePhase.IDLE;
+    private Lifecycle.Phase phase = Lifecycle.Phase.IDLE;
     private RunHandle currentRun;
     private BatchState currentBatch;
 
     public synchronized StartRunResult startRun() {
-        if (phase != LifecyclePhase.IDLE) {
+        if (phase != Lifecycle.Phase.IDLE) {
             return new StartRunResult.Rejected(startRejection());
         }
         currentRun = new RunHandle(ownerKey);
         currentBatch = null;
         acceptedCallIds.clear();
-        phase = LifecyclePhase.RUNNING;
+        phase = Lifecycle.Phase.RUNNING;
         return new StartRunResult.Started(currentRun);
     }
 
-    public synchronized BeginBatchResult beginBatch(RunHandle run, CallBatch batch) {
+    public synchronized BeginBatchResult beginBatch(RunHandle run, Call.Batch batch) {
         Objects.requireNonNull(run, "run");
         Objects.requireNonNull(batch, "batch");
         if (isStaleRun(run)) {
             return new BeginBatchResult.Rejected(BatchRejection.STALE_RUN);
         }
-        if (phase != LifecyclePhase.RUNNING) {
+        if (phase != Lifecycle.Phase.RUNNING) {
             return new BeginBatchResult.Rejected(BatchRejection.RUN_NOT_ACCEPTING_BATCHES);
         }
         if (currentBatch != null && currentBatch.hasUnsettledCalls()) {
@@ -43,12 +43,12 @@ public final class RunLifecycle {
             return new BeginBatchResult.Rejected(BatchRejection.CALL_ID_ALREADY_ACCEPTED);
         }
 
-        currentBatch = new BatchState(new BatchHandle(ownerKey, run), batch.calls());
+        currentBatch = new BatchState(new Batch.Handle(ownerKey, run), batch.calls());
         acceptedCallIds.addAll(batch.calls());
         return new BeginBatchResult.Begun(currentBatch.handle);
     }
 
-    public ExecutionResult execute(BatchHandle batch, CallId call, Effect effect) {
+    public ExecutionResult execute(Batch.Handle batch, Call.Id call, Effect effect) {
         Objects.requireNonNull(batch, "batch");
         Objects.requireNonNull(call, "call");
         Objects.requireNonNull(effect, "effect");
@@ -63,7 +63,7 @@ public final class RunLifecycle {
 
         try {
             effect.execute();
-            complete(batch, call, CallStatus.COMPLETED);
+            complete(batch, call, Call.Status.COMPLETED);
             return new ExecutionResult.Executed();
         } catch (RuntimeException | Error failure) {
             recordFailure(batch, call, failure);
@@ -76,10 +76,10 @@ public final class RunLifecycle {
         if (isStaleRun(run)) {
             return new StopResult.Rejected(StopRejection.STALE_RUN);
         }
-        if (phase == LifecyclePhase.RUNNING) {
-            phase = LifecyclePhase.STOPPING;
+        if (phase == Lifecycle.Phase.RUNNING) {
+            phase = Lifecycle.Phase.STOPPING;
             cancelPending();
-        } else if (phase != LifecyclePhase.STOPPING && phase != LifecyclePhase.CLOSING) {
+        } else if (phase != Lifecycle.Phase.STOPPING && phase != Lifecycle.Phase.CLOSING) {
             return new StopResult.Rejected(StopRejection.RUN_NOT_ACTIVE);
         }
         return new StopResult.Acknowledged(snapshot(), currentBatchObservation());
@@ -94,35 +94,35 @@ public final class RunLifecycle {
             return new FinishRunResult.Rejected(FinishRejection.BATCH_UNSETTLED);
         }
 
-        phase = phase == LifecyclePhase.CLOSING ? LifecyclePhase.CLOSED : LifecyclePhase.IDLE;
+        phase = phase == Lifecycle.Phase.CLOSING ? Lifecycle.Phase.CLOSED : Lifecycle.Phase.IDLE;
         currentRun = null;
         currentBatch = null;
         acceptedCallIds.clear();
         return new FinishRunResult.Finished(snapshot());
     }
 
-    public synchronized LifecycleSnapshot close() {
-        if (phase == LifecyclePhase.CLOSED || phase == LifecyclePhase.CLOSING) {
+    public synchronized Lifecycle.Snapshot close() {
+        if (phase == Lifecycle.Phase.CLOSED || phase == Lifecycle.Phase.CLOSING) {
             return snapshot();
         }
-        if (phase == LifecyclePhase.IDLE) {
-            phase = LifecyclePhase.CLOSED;
+        if (phase == Lifecycle.Phase.IDLE) {
+            phase = Lifecycle.Phase.CLOSED;
         } else {
-            phase = LifecyclePhase.CLOSING;
+            phase = Lifecycle.Phase.CLOSING;
             cancelPending();
         }
         return snapshot();
     }
 
-    public synchronized LifecycleSnapshot snapshot() {
+    public synchronized Lifecycle.Snapshot snapshot() {
         return switch (phase) {
-            case IDLE -> new LifecycleSnapshot.Idle();
-            case RUNNING, STOPPING, CLOSING -> new LifecycleSnapshot.Active(phase);
-            case CLOSED -> new LifecycleSnapshot.Closed();
+            case IDLE -> Lifecycle.idle();
+            case RUNNING, STOPPING, CLOSING -> new Lifecycle.Snapshot.Active(phase);
+            case CLOSED -> Lifecycle.closed();
         };
     }
 
-    public synchronized BatchSnapshotResult batchSnapshot(BatchHandle handle) {
+    public synchronized BatchSnapshotResult batchSnapshot(Batch.Handle handle) {
         Objects.requireNonNull(handle, "handle");
         if (isStaleBatch(handle)) {
             return new BatchSnapshotResult.Rejected(BatchSnapshotRejection.STALE_BATCH);
@@ -130,16 +130,16 @@ public final class RunLifecycle {
         return new BatchSnapshotResult.Available(currentBatch.snapshot());
     }
 
-    private void complete(BatchHandle batch, CallId call, CallStatus status) {
+    private void complete(Batch.Handle batch, Call.Id call, Call.Status status) {
         synchronized (this) {
             currentBatch.ensureCurrent(batch, call);
             currentBatch.markTerminal(call, status);
         }
     }
 
-    private void recordFailure(BatchHandle batch, CallId call, Throwable failure) {
+    private void recordFailure(Batch.Handle batch, Call.Id call, Throwable failure) {
         try {
-            complete(batch, call, CallStatus.FAILED_AFTER_START);
+            complete(batch, call, Call.Status.FAILED_AFTER_START);
         } catch (RuntimeException | Error accountingFailure) {
             if (accountingFailure != failure) {
                 failure.addSuppressed(accountingFailure);
@@ -155,35 +155,24 @@ public final class RunLifecycle {
         };
     }
 
-    private ExecutionRejection rejectExecution(BatchHandle batch, CallId call) {
-        if (isStaleBatch(batch)) {
-            return ExecutionRejection.STALE_BATCH;
-        }
-        if (phase != LifecyclePhase.RUNNING) {
-            return ExecutionRejection.RUN_NOT_ACCEPTING_EFFECTS;
-        }
-        CallStatus target = currentBatch.status(call);
-        if (target == null) {
-            return ExecutionRejection.UNKNOWN_CALL;
-        }
-        if (target == CallStatus.EXECUTING) {
-            return ExecutionRejection.ALREADY_EXECUTING;
-        }
-        if (target.isTerminal()) {
-            return ExecutionRejection.ALREADY_TERMINAL;
-        }
-        CallId next = currentBatch.nextUnsettled();
-        if (next == null || !next.equals(call)) {
-            return ExecutionRejection.OUT_OF_ORDER;
-        }
-        return null;
+    private ExecutionRejection rejectExecution(Batch.Handle batch, Call.Id call) {
+        if (isStaleBatch(batch)) return ExecutionRejection.STALE_BATCH;
+        if (phase != Lifecycle.Phase.RUNNING) return ExecutionRejection.RUN_NOT_ACCEPTING_EFFECTS;
+
+        Call.Status target = currentBatch.status(call);
+        if (target == null) return ExecutionRejection.UNKNOWN_CALL;
+        if (target == Call.Status.EXECUTING) return ExecutionRejection.ALREADY_EXECUTING;
+        if (target.isTerminal()) return ExecutionRejection.ALREADY_TERMINAL;
+
+        Call.Id next = currentBatch.nextUnsettled();
+        return next != null && next.equals(call) ? null : ExecutionRejection.OUT_OF_ORDER;
     }
 
     private boolean isStaleRun(RunHandle run) {
         return !run.belongsTo(ownerKey) || run != currentRun;
     }
 
-    private boolean isStaleBatch(BatchHandle batch) {
+    private boolean isStaleBatch(Batch.Handle batch) {
         return !batch.belongsTo(ownerKey) || isStaleRun(batch.run())
             || currentBatch == null || currentBatch.handle != batch;
     }
@@ -194,10 +183,10 @@ public final class RunLifecycle {
         }
     }
 
-    private BatchObservation currentBatchObservation() {
+    private Batch.Observation currentBatchObservation() {
         return currentBatch == null
-            ? new BatchObservation.Absent()
-            : new BatchObservation.Present(currentBatch.snapshot());
+            ? Batch.Observation.absent()
+            : new Batch.Observation.Present(currentBatch.snapshot());
     }
 
     public enum StartRejection { BUSY, CLOSED }
@@ -213,7 +202,7 @@ public final class RunLifecycle {
     }
 
     public sealed interface BeginBatchResult {
-        record Begun(BatchHandle batch) implements BeginBatchResult { public Begun { Objects.requireNonNull(batch); } }
+        record Begun(Batch.Handle batch) implements BeginBatchResult { public Begun { Objects.requireNonNull(batch); } }
         record Rejected(BatchRejection reason) implements BeginBatchResult { public Rejected { Objects.requireNonNull(reason); } }
     }
 
@@ -223,7 +212,7 @@ public final class RunLifecycle {
     }
 
     public sealed interface StopResult {
-        record Acknowledged(LifecycleSnapshot lifecycle, BatchObservation batch) implements StopResult {
+        record Acknowledged(Lifecycle.Snapshot lifecycle, Batch.Observation batch) implements StopResult {
             public Acknowledged {
                 Objects.requireNonNull(lifecycle);
                 Objects.requireNonNull(batch);
@@ -233,12 +222,12 @@ public final class RunLifecycle {
     }
 
     public sealed interface FinishRunResult {
-        record Finished(LifecycleSnapshot lifecycle) implements FinishRunResult { public Finished { Objects.requireNonNull(lifecycle); } }
+        record Finished(Lifecycle.Snapshot lifecycle) implements FinishRunResult { public Finished { Objects.requireNonNull(lifecycle); } }
         record Rejected(FinishRejection reason) implements FinishRunResult { public Rejected { Objects.requireNonNull(reason); } }
     }
 
     public sealed interface BatchSnapshotResult {
-        record Available(BatchSnapshot snapshot) implements BatchSnapshotResult {
+        record Available(Batch.Snapshot snapshot) implements BatchSnapshotResult {
             public Available { Objects.requireNonNull(snapshot); }
         }
         record Rejected(BatchSnapshotRejection reason) implements BatchSnapshotResult {
@@ -247,46 +236,46 @@ public final class RunLifecycle {
     }
 
     private static final class BatchState {
-        private final BatchHandle handle;
-        private final List<CallId> order;
-        private final Map<CallId, CallStatus> statuses;
+        private final Batch.Handle handle;
+        private final List<Call.Id> order;
+        private final Map<Call.Id, Call.Status> statuses;
 
-        private BatchState(BatchHandle handle, List<CallId> calls) {
+        private BatchState(Batch.Handle handle, List<Call.Id> calls) {
             this.handle = handle;
             this.order = List.copyOf(calls);
             this.statuses = new LinkedHashMap<>();
-            calls.forEach(call -> statuses.put(call, CallStatus.PENDING));
+            calls.forEach(call -> statuses.put(call, Call.Status.PENDING));
         }
 
-        private CallStatus status(CallId call) {
+        private Call.Status status(Call.Id call) {
             return statuses.get(call);
         }
 
-        private void markExecuting(CallId call) {
-            mark(call, CallStatus.EXECUTING);
+        private void markExecuting(Call.Id call) {
+            mark(call, Call.Status.EXECUTING);
         }
 
-        private void markTerminal(CallId call, CallStatus status) {
-            if (!status.isTerminal() || statuses.get(call) != CallStatus.EXECUTING) {
+        private void markTerminal(Call.Id call, Call.Status status) {
+            if (!status.isTerminal() || statuses.get(call) != Call.Status.EXECUTING) {
                 throw new IllegalStateException("Call is not executing");
             }
             mark(call, status);
         }
 
-        private void ensureCurrent(BatchHandle expectedHandle, CallId call) {
-            if (handle != expectedHandle || statuses.get(call) != CallStatus.EXECUTING) {
+        private void ensureCurrent(Batch.Handle expectedHandle, Call.Id call) {
+            if (handle != expectedHandle || statuses.get(call) != Call.Status.EXECUTING) {
                 throw new IllegalStateException("Executing call is no longer current");
             }
         }
 
-        private void mark(CallId call, CallStatus status) {
+        private void mark(Call.Id call, Call.Status status) {
             if (!statuses.containsKey(call)) {
                 throw new IllegalStateException("Unknown accepted call");
             }
             statuses.put(call, status);
         }
 
-        private CallId nextUnsettled() {
+        private Call.Id nextUnsettled() {
             return order.stream()
                 .filter(call -> !statuses.get(call).isTerminal())
                 .findFirst()
@@ -295,18 +284,18 @@ public final class RunLifecycle {
 
         private void cancelPending() {
             order.stream()
-                .filter(call -> statuses.get(call) == CallStatus.PENDING)
-                .forEach(call -> statuses.put(call, CallStatus.CANCELLED_BEFORE_START));
+                .filter(call -> statuses.get(call) == Call.Status.PENDING)
+                .forEach(call -> statuses.put(call, Call.Status.CANCELLED_BEFORE_START));
         }
 
         private boolean hasUnsettledCalls() {
             return statuses.values().stream().anyMatch(status -> !status.isTerminal());
         }
 
-        private BatchSnapshot snapshot() {
-            List<CallSnapshot> snapshot = new ArrayList<>(order.size());
-            order.forEach(call -> snapshot.add(new CallSnapshot(call, statuses.get(call))));
-            return new BatchSnapshot(snapshot);
+        private Batch.Snapshot snapshot() {
+            List<Call.Snapshot> snapshot = new ArrayList<>(order.size());
+            order.forEach(call -> snapshot.add(new Call.Snapshot(call, statuses.get(call))));
+            return new Batch.Snapshot(snapshot);
         }
     }
 }
