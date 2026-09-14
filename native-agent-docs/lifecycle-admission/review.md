@@ -4,13 +4,13 @@ Append-only. Rounds are in chronological order. Add a new round or a Resolution 
 
 ## Current state
 
-- Review status: FINDINGS_READY_FOR_ADDRESS
-- Latest round: 3 (Claude Fable 5.1, adversarial prompt in the appendix)
-- Open Blockers: 3 — round 3 B-001 (non-Runtime throwable wedges the owner), B-002 (no S1 receipt/evidence), B-003 (AC-012/AC-013 targets)
-- Open Majors: 2 — round 3 M-001 (tests do not run the AC scenarios), M-002 (running effect cannot observe Stop)
-- Minors/Nits: 6 (round 3 N-001–N-006)
+- Review status: REOPEN_FULL_REVIEW (round 3 addressed; the fix changed the LC-006 contract and one operation-matrix row, which invalidates the frozen basis)
+- Latest round: 3, addressed on 2026-09-14 (see "Round 3 — Resolution")
+- Open Blockers: 0 pending fresh review
+- Open Majors: 0 pending fresh review
+- Deferred Minors/Nits: 1 (N-003)
 - Frozen basis: INVALIDATED
-- Next permitted action: address round 3 findings, regenerate evidence, obtain a fresh review
+- Next permitted action: fresh independent review of the current basis. Regenerate and verify the S1 receipt first.
 
 ## Round 1
 
@@ -502,3 +502,54 @@ Deliver your findings strictly using this structure:
    - For every Blocker and Major, provide a concrete sequence of thread calls or code snippet demonstrating the failure.
 4. **Actionable Recommendations**:
    - Exact code diff or design revision required to resolve each finding.
+
+## Round 3 — Resolution
+
+Appended after the round-3 ledger and prompt. Round-3 text above is unchanged.
+
+Classification: B-001, M-002, N-001, N-002, N-004 are bounded defects (A). B-002, B-003, M-001, N-005, N-006 are missing proof (B). N-003 is deferred. No finding required replanning (C). The fix does change a normative requirement (LC-006) and one matrix row, so a full review is reopened rather than a targeted gate.
+
+- **B-001 — Resolved.** `RunLifecycle.execute` and `recordFailure` now catch `Throwable` and rethrow the same object through a generic unchecked rethrow. Regression: `RunLifecycleTest#terminalAccounting` throws a checked `IOException` through a sneaky rethrow. Before the fix it failed with `expected: <FAILED_AFTER_START> but was: <EXECUTING>`; after the fix it passes and asserts the same object is rethrown and a second attempt is `ALREADY_TERMINAL`. Spec: LC-006 statement, AC-006 `when`, LC-006 audit residual obligation now say any Throwable. `design.md` State and transitions updated.
+- **B-002 — Resolved.** `scripts/native-spec/check_slice.py receipt` produces the S1 receipt: strict structure check (EV-STRUCTURE), `javac --release 21` on the six lifecycle sources (EV-DESIGN-COMPILE), `javap -package` signatures (EV-DESIGN-SOURCE), spec/design/declaration/configuration hashes and evidence-result hashes, and a digest over the `receipt_identity` fields. `check_slice.py verify --receipt <path>` recomputes everything and rejects drift (EV-RECEIPT). The receipt is generated output under the ignored `.agent-work/native-agent-docs/lifecycle-admission/s1-receipt.json`, per `workflow.md` Artifacts; regenerate it rather than trusting a stored copy. Result on the resolved basis: status PASS, javac 25.0.2 with `--release 21`, no compiler output, digest `6a54d476…d5e0`, verify PASS with no mismatches. The spec evidence descriptions now name the commands.
+- **B-003 — Resolved.** AC-012 target is `scripts/native-spec/check_slice.py selftest`; AC-013 target is `RunLifecycleTest#awtAdmissionSmoke`; EV-SMOKE describes the JUnit method on the real AWT event dispatch thread. `check` rule T002 now fails if an acceptance target test method or script does not exist. `selftest` result: 7/7 PASS — intact basis passes; removed LC-004 audit row rejected (A001); unchanged basis verifies; altered source rejected (`declaration_hashes`); altered design rejected (`design_hash`); edited receipt rejected (`digest`); receipt carries no behavior evidence IDs.
+- **M-001 — Resolved.** Tests now execute the spec text:
+  - AC-001 `singleRunOwnership`: old-generation handle gets `STALE_RUN` from stop, finish and beginBatch; the new run stays `RUNNING` and still admits a batch.
+  - AC-003 `orderedExclusiveExecution`: B before A is `OUT_OF_ORDER`; two threads released by a `CyclicBarrier` execute A; exactly one `Executed`, one `ALREADY_EXECUTING`, one callback entry; B blocked while A runs, then executes once; A again is `ALREADY_TERMINAL`.
+  - AC-007 `staleHandleIsolation`: foreign run and batch handles are rejected by beginBatch, execute, batchSnapshot, stop and finishRun with no callback and unchanged foreign-owner lifecycle and batch snapshots; replaced batch handle is `STALE_BATCH` for execute and query; previous-generation run and batch handles are rejected after a new run starts, with the new run unchanged.
+  - AC-008 `closeDrainsWithoutReopening`: while the active call runs, `active` is `EXECUTING`, `pending` is `CANCELLED_BEFORE_START` and finish is `BATCH_UNSETTLED`; after release `active` is `COMPLETED`; closed owner rejects start, execute and stop and stays `CLOSED`.
+  - AC-009 `nullInputDoesNotMutate`: `Call.Id`, `Call.Batch.of` (list and element), and every null argument of beginBatch, execute, stop, finishRun and batchSnapshot, both idle and with an active run and batch; lifecycle and batch snapshots are compared after each call; no callback runs; the owner stays usable.
+  - AC-011 `multipleBatchesPreserveIdentity`: pending finish rejected; `[freshB, reusedA]` rejected in the same run without changing the settled batch; `[freshB]` then begins and executes; finish returns `IDLE` and a new run starts.
+  - Reentrancy (new `reentrantOperationsFromEffect`): from inside an effect, execute is `ALREADY_EXECUTING`/`OUT_OF_ORDER`, beginBatch `PREVIOUS_BATCH_UNSETTLED`, finish `BATCH_UNSETTLED`, start `BUSY`, stop and close succeed; the outer call records `COMPLETED`, the pending call is cancelled and finish reaches `CLOSED`.
+- **M-002 — Resolved (documented driver ownership, reviewer option B).** No API change. `Effect` Javadoc, `design.md` Scope and `product.md` Pi fidelity now state that the driver owns a cooperative cancellation token, cancels it together with `stop(run)`, and converts rethrown effect failures into tool error results as Pi does at `agent-loop.ts:708-714`.
+- **N-001 — Resolved.** Operation matrix splits the execute row: `STOPPING|CLOSING` → `RUN_NOT_ACCEPTING_EFFECTS`; `IDLE|CLOSED` → `STALE_BATCH`. Covered by `closeDrainsWithoutReopening`.
+- **N-002 — Resolved (documented).** `design.md` records that a throwable built with suppression disabled drops an accounting failure.
+- **N-003 — Deferred.** Removing `ownerKey` or hiding `Batch.Handle.run()` changes package-internal representation without closing an observable hole; reference identity already rejects forged and foreign handles, as the round-3 probes and `staleHandleIsolation` show. Residual risk: none observable outside the package.
+- **N-004 — Resolved.** `Effect` has contract Javadoc: synchronous, outside the monitor, throwable accounting, no detached work, no stop signal.
+- **N-005 — Resolved.** `gradlew.bat` no longer exists. The JUnit 4 runtime dependency now has a comment. Verified by removing it: the test executor fails to start with `ServiceConfigurationError: org.junit.platform.launcher.LauncherSessionListener: Provider com.intellij.tests.JUnit5TestSessionListener could not be instantiated` caused by `ClassNotFoundException`.
+- **N-006 — Resolved.** The tautological `assertNotNull` calls were replaced by the AC-007 and AC-011 assertions above.
+
+Verification on the resolved basis:
+
+| Check | Result |
+|---|---|
+| `./gradlew :plugin-core:test --tests '…RunLifecycleTest'` | 13 tests, 0 failures, 0 errors |
+| Same, `--rerun` five times | 5/5 BUILD SUCCESSFUL |
+| `./gradlew :plugin-core:test :plugin-core:buildPlugin` | BUILD SUCCESSFUL |
+| `python3 scripts/native-spec/check_slice.py check` | PASS, no findings |
+| `python3 scripts/native-spec/check_slice.py selftest` | 7/7 PASS |
+| `check_slice.py receipt` then `verify` | PASS, no mismatches |
+| `git diff --check` | clean |
+
+Not run: EV-SURFACE and EV-BUILD as IDE tools (S3 evidence), and no fresh independent review.
+
+- Address status: COMPLETE
+- Implementation review status: REOPEN_FULL_REVIEW
+- Reviewer checklist: COMPLETE (round 3)
+- Frozen basis: INVALIDATED (LC-006, AC-006, AC-012, AC-013, EV-SMOKE, evidence command text, execute matrix row changed)
+- Open Blockers: 0
+- Open Majors: 0
+- Deferred Minors/Nits: 1
+- Verification: PASS
+- Final gate: FAIL (no review of the changed basis yet)
+- Stop reason: normative spec rows changed during address
+- Next permitted action: fresh independent review of the current basis
