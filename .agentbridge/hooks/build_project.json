@@ -1,1 +1,0 @@
-{"failure":[{"script":"scripts/build-project-clear-cache.js","failSilently":true,"timeout":15,"capabilities":["filesystem"]}]}
