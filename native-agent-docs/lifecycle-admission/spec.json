@@ -52,7 +52,7 @@
     },
     {
       "id": "LC-006",
-      "statement": "Each batch call has exactly one terminal status. Effect has no return value: normal return records COMPLETED; RuntimeException or Error records FAILED_AFTER_START before rethrowing the same object. Lifecycle state retains only the status; no public complete method or automatic replay exists.",
+      "statement": "Each batch call has exactly one terminal status. Effect has no return value: normal return records COMPLETED; any Throwable, including a checked exception raised without a declaration, records FAILED_AFTER_START before rethrowing the same object. Lifecycle state retains only the status; no public complete method or automatic replay exists.",
       "acceptance": [
         "AC-006"
       ]
@@ -133,7 +133,7 @@
     },
     {
       "id": "AC-006",
-      "when": "Execute value-free effects once with normal return, RuntimeException and AssertionError; attempt each again.",
+      "when": "Execute value-free effects once with normal return, RuntimeException, AssertionError and a checked IOException thrown through a generic rethrow; attempt each again.",
       "then": "One terminal status each; thrown object is rethrown unchanged after FAILED_AFTER_START accounting; no replay or nullable result exists.",
       "target": "RunLifecycleTest#terminalAccounting"
     },
@@ -220,7 +220,7 @@
       "requirement": "LC-006",
       "invalid": "Duplicate completion or contradictory outcome flags",
       "type_api_prevention": "Value-free Effect; one terminal CallStatus; Executed and Rejected are disjoint closed variants; no public complete operation",
-      "residual_runtime_obligation": "Normal return records COMPLETED; RuntimeException/Error records FAILED_AFTER_START and rethrows the same object; current executing identity is checked and terminal recording occurs once",
+      "residual_runtime_obligation": "Normal return records COMPLETED; any Throwable records FAILED_AFTER_START and rethrows the same object; current executing identity is checked and terminal recording occurs once",
       "justification": "An effect failure is temporal/external and must be observed"
     },
     {
@@ -563,8 +563,15 @@
     },
     {
       "operation": "execute",
-      "phase": "STOPPING|CLOSING|CLOSED",
+      "phase": "STOPPING|CLOSING",
       "result": "Rejected(RUN_NOT_ACCEPTING_EFFECTS) after current-batch identity check",
+      "next_phase": "unchanged"
+    },
+    {
+      "operation": "execute",
+      "phase": "IDLE|CLOSED",
+      "precondition": "no current batch after finishRun",
+      "result": "Rejected(STALE_BATCH)",
       "next_phase": "unchanged"
     },
     {

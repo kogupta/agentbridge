@@ -65,9 +65,11 @@ public final class RunLifecycle {
             effect.execute();
             complete(batch, call, Call.Status.COMPLETED);
             return new ExecutionResult.Executed();
-        } catch (RuntimeException | Error failure) {
+        } catch (Throwable failure) {
+            // Effect declares no checked exceptions, but Kotlin callers and generic rethrows can still
+            // raise one. Every throwable must settle the call, or the batch stays EXECUTING forever.
             recordFailure(batch, call, failure);
-            throw failure;
+            throw rethrowUnchecked(failure);
         }
     }
 
@@ -138,11 +140,16 @@ public final class RunLifecycle {
     private void recordFailure(Batch.Handle batch, Call.Id call, Throwable failure) {
         try {
             complete(batch, call, Call.Status.FAILED_AFTER_START);
-        } catch (RuntimeException | Error accountingFailure) {
+        } catch (Throwable accountingFailure) {
             if (accountingFailure != failure) {
                 failure.addSuppressed(accountingFailure);
             }
         }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <T extends Throwable> RuntimeException rethrowUnchecked(Throwable failure) throws T {
+        throw (T) failure;
     }
 
     private StartRejection startRejection() {

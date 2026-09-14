@@ -10,6 +10,8 @@ Installed in production under `plugin-core/src/main/java/com/github/catatafishen
 
 It does not own provider streaming, tool argument decoding, PSI, JSON, coroutine scopes, Swing content, process handlers, or platform writes. A later Kotlin adapter may schedule the Java owner from an IntelliJ-owned scope; it must call this API and must not duplicate its state machine.
 
+The effect receives no stop signal. Pi passes an abort signal into each running tool (`agent-loop.ts:677-718`); here the driver owns any cooperative cancellation token, passes it to tools itself, and cancels it together with `stop(run)`. An effect can also observe `STOPPING`/`CLOSING` through `snapshot()`. The owner catches and rethrows effect failures; converting them into tool error results and continuing, as Pi does (`agent-loop.ts:708-714`), is the driver's job.
+
 ## Java surface
 
 | Type | Role | Construction/visibility rule |
@@ -51,7 +53,7 @@ The owner stores one `Phase`, current `RunHandle`, at most one current `BatchSta
 - `IDLE -> CLOSED`: `close()` is immediate because no effect is active.
 - `CLOSED`: `startRun`, batch admission, effect execution and later close cannot reopen or mutate the owner.
 
-The public API intentionally does not expose `BatchState`, its cursor, its status map or an effect-completion operation. `Effect.execute()` returns no value; normal return records `COMPLETED`, while `RuntimeException`/`Error` records `FAILED_AFTER_START` and rethrows the same object. Lifecycle state retains only statuses, never callback results or throwables.
+The public API intentionally does not expose `BatchState`, its cursor, its status map or an effect-completion operation. `Effect.execute()` returns no value; normal return records `COMPLETED`, while any `Throwable` records `FAILED_AFTER_START` and is rethrown as the same object. `Effect` declares no checked exceptions, but Kotlin callers and generic rethrows can raise one; catching only `RuntimeException`/`Error` left such a call `EXECUTING` forever. Lifecycle state retains only statuses, never callback results or throwables. If recording the failure itself throws, that exception is attached with `addSuppressed`; a throwable constructed with suppression disabled drops it, which is an accepted Java limitation.
 
 ## Admission algorithm
 
