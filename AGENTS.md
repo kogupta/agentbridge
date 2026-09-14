@@ -15,7 +15,7 @@
 - Prefer IDEA Facade composite tools for IntelliJ-aware reads, searches, refactors, diagnostics, tests, and builds. Use CLI Git/GitHub or OMP native Git when the facade has no suitable Git operation.
 - A failed or incomplete IDEA Facade response is an infrastructure defect, not evidence that the repository code is wrong. Report unexpected facade behavior with the exact call, expected response, actual response, and workaround. Then use the narrowest safe fallback.
 - A test request that reports zero discovered tests is not a passing test result.
-- Use the normal project wrapper command when no suitable IDE runner exists. Do not invent build or test task names.
+- Run Gradle through `mtk gradle ...` only. Never run `./gradlew ...` or `gradle ...` directly. Do not invent build or test task names.
 - Batch independent reads and checks. Use the lightest verification that establishes the needed fact.
 
 ## Design and domain model
