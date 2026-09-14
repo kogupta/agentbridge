@@ -28,6 +28,8 @@ dependencies {
 
     testImplementation("org.junit.jupiter:junit-jupiter:${providers.gradleProperty("junitVersion").get()}")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+    // The IntelliJ Platform test framework registers com.intellij.tests.JUnit5TestSessionListener, which
+    // loads JUnit 4 classes; without this the Gradle test executor fails to start.
     testRuntimeOnly("junit:junit:4.13.2")
 }
 
