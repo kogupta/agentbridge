@@ -1,0 +1,17 @@
+<idea-plugin require-restart="false">
+  <id>com.github.catatafishen.ideagentforcopilot</id>
+  <name>AgentBridge Native Agent</name>
+  <vendor email="henrik@westergard.org" url="https://github.com/catatafishen/agentbridge">
+    AgentBridge Contributors
+  </vendor>
+
+  <category>AI Assistant</category>
+  <description><![CDATA[
+    Experimental IntelliJ-native coding agent core. The native path is built directly on
+    IntelliJ APIs; MCP, ACP, JCEF and external-agent runtime bridges are not included.
+  ]]></description>
+
+  <idea-version since-build="253"/>
+  <depends>com.intellij.modules.platform</depends>
+  <depends optional="true">com.intellij.modules.java</depends>
+</idea-plugin>
