@@ -36,7 +36,8 @@ agentbridge/
 ├── plugin-core/       # Native IntelliJ plugin
 ├── buildSrc/          # Gradle build helpers
 ├── scripts/           # Development and release scripts
-└── .agent-work/       # Ignored planning and review artifacts
+├── native-agent-docs/ # Product scope, workflow and feature specs
+└── .agent-work/       # Ignored scratch work
 ```
 
 ## Development direction
@@ -51,6 +52,6 @@ Java domain values and transitions
 IntelliJ platform side effects
 ```
 
-The implementation process is defined in `.agent-work/thought-process.md` and `.agent-work/native-agent-workflow/plan.md`. The lifecycle feature contract is in `.agent-work/native-agent-workflow/lifecycle-admission/`.
+Product scope and decisions are in `native-agent-docs/product.md`. The implementation process is in `native-agent-docs/workflow.md`. The lifecycle feature contract is in `native-agent-docs/lifecycle-admission/`.
 
 The donor runtime was deliberately removed on this branch. New provider, semantic-tool, verification and Swing UI capabilities will be added only after their typed contracts and focused behavioral evidence exist.

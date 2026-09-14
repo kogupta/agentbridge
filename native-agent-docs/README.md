@@ -1,51 +1,45 @@
-# .agent-work index
+# Native agent docs
 
-This directory is git-ignored. Nothing here is recoverable from history. Move files instead of deleting them unless a copy is proven redundant.
+Each fact has one home. If two files seem to say the same thing, the file named here wins and the other must only reference it.
 
-## Live documents (authorities, in reading order)
-
-| Path | Role |
+| File | Owns |
 |---|---|
-| `thought-process.md` | Workflow principles. Hash-frozen by `native-agent-workflow/source-manifest.json`. |
-| `native-agent-workflow/plan.md` | Constrained implementation workflow (W1–W8, S1–S3). Referenced from the repository `README.md`. |
-| `native-agent-workflow/source-manifest.json`, `artifact-check.json` | Frozen source hashes and structure check for the workflow plan. |
-| `native-agent-workflow/lifecycle-admission/spec.json` | Canonical LC-001–LC-012 requirements and AC-001–AC-013 acceptance criteria. |
-| `native-agent-workflow/lifecycle-admission/design.md` | Java surface, transitions, admission algorithm, operation matrix, type-safety audit. |
-| `native-agent-workflow/lifecycle-admission/review-state.md` | Running review ledger for the lifecycle slice. |
-| `native-agent-workflow/lifecycle-admission/review-round-2.md`, `review-round-3.md` | Persisted findings per round. Round 3 is the current open set. |
-| `native-agent-workflow/lifecycle-admission/review-basis.md` | Frozen basis dump for round 2. Invalidated. Regenerate before the next review, then archive this one. |
-| `native-agent-workflow/lifecycle-admission/adversarial-review-prompt.md` | Prompt used for round 3. |
+| `product.md` | Hypothesis, requirements R1–R6, decision registry, Pi fidelity, invariants I1–I12, tool and Codex contracts, run behavior, roadmap, dogfood gate, exclusions, donor evidence. |
+| `workflow.md` | Principles, workflow invariants W1–W8, artifact layout, SPEC_VALID and DESIGN_VALID gates, reviewer contract, failure routing, current slice stages. |
+| `lifecycle-admission/spec.json` | Canonical LC-001–LC-012, AC-001–AC-013, type-safety audit, operation matrix, null boundaries, evidence IDs, stage bindings. |
+| `lifecycle-admission/design.md` | Java surface, transitions, admission algorithm, precedence rules. References `spec.json` for tables. |
+| `lifecycle-admission/review.md` | Append-only review ledger: current state, rounds 1–3, the adversarial review prompt. |
 
-## Frozen inputs to the workflow plan (do not edit)
+Reading order for implementation work on the lifecycle slice: `lifecycle-admission/review.md` current state → `spec.json` → `design.md` → `workflow.md` current slice. Read `product.md` when a finding touches product scope or Pi fidelity.
 
-`native-agent-mvp/` holds the MVP generation from 2026-09-13. The workflow plan and both manifests hash these files, so they stay in place with their current names.
+## Consolidation record (2026-09-14)
 
-| Path | Role |
+Twenty files became six. Git history keeps every removed file.
+
+| Removed | Content now in |
 |---|---|
-| `native-agent-mvp/phased-scope.md` | Authoritative MVP product scope. Older documents call this file `intellij-native-agent-phased-scope.md`. Same content. |
-| `native-agent-mvp/plan.md` | MVP implementation plan. **Hash drift:** both manifests record `49a6a970…`, the file now hashes `4faeb2e7…` (edited 2026-09-14 14:52). |
-| `native-agent-mvp/feedback.md` | Review feedback and architectural decisions. Sections 4 and 5 define MVP scope and exclusions. |
-| `native-agent-mvp/handoff.md` | Implementation-model handoff for the MVP plan. |
-| `native-agent-mvp/review-state.md` | Author audit of the MVP plan. Not the lifecycle review state. |
-| `native-agent-mvp/scope-before-revision.md` | Original scope, preserved because `phased-scope.md` cites it. |
-| `native-agent-mvp/source-manifest.json`, `artifact-check.json` | Frozen hashes for the MVP generation. |
+| `native-agent-mvp/phased-scope.md` | `product.md` |
+| `native-agent-mvp/plan.md` | `product.md` (contracts, grammar, stage tests folded into Roadmap) |
+| `native-agent-mvp/feedback.md` | `product.md` Decisions, Architecture rules, Dogfood gate, Out of scope |
+| `native-agent-mvp/handoff.md` | `product.md` Roadmap (parallel ownership), `workflow.md` Implementation packet (progress report). Branch and Stage 0 instructions were obsolete. |
+| `native-agent-mvp/scope-before-revision.md` | Superseded by the revised scope; no unique normative content kept. |
+| `native-agent-mvp/review-state.md` | `product.md` Status (author audit only, no independent review). |
+| `thought-process.md` | `workflow.md` Goal and principles. The "task for this session" prompt was answered by the workflow plan. |
+| `native-agent-workflow/plan.md` | `workflow.md`; its decision table moved to `product.md` Decisions. |
+| `native-agent-workflow/lifecycle-admission/review-state.md`, `review-round-2.md`, `review-round-3.md`, `adversarial-review-prompt.md` | `lifecycle-admission/review.md` |
+| `native-agent-workflow/lifecycle-admission/review-basis.md` | Deleted. It was a 133 KB concatenation of other files. |
+| `*/source-manifest.json`, `*/artifact-check.json` | Deleted. They hashed old paths and donor files that no longer exist. Regenerate `EV-SOURCE` from current paths. |
 
-## Archive (historical, superseded)
+Conflicts resolved during the merge, each by the later explicit user decision already recorded in the workflow plan:
 
-| Path | What it was |
-|---|---|
-| `archive/2026-09-13-hardened-plan/` | Greenfield `native-plugin` plan v3.0.0-hardened, its REJECT review, review state, and handoff. Superseded by the merged plan. |
-| `archive/2026-09-13-strip-plan/` | Strip-by-subtraction plan, revision 5. Superseded by the merged plan. |
-| `archive/2026-09-13-merged-plan/` | Merged plan including "Plan revision 1" appendix, plus its round-1 review. Historical reference only per `phased-scope.md`. |
-| `archive/redundant-copies/` | Safe to delete. `intellij-native-agent-phased-scope.md` is byte-identical to `native-agent-mvp/phased-scope.md`. `native-agent-merged-plan.md` is a strict prefix of the archived revision. `design-source-path.txt` repeats the "Design status" paragraph of `design.md`. |
+- Language: Java core with minimal Kotlin, not "Kotlin preferred for new code".
+- `run_command`: excluded from the semantic MVP; its contract is kept only as a deferred section.
+- Tool results: sealed domain outcomes; the `status/code` envelope only at the LLM boundary.
+- Session lifetime: tool-window content owns the session.
 
-## Name map for old references
+Issues found and left open, because fixing them changes content rather than layout:
 
-| Old name in a document | Current location |
-|---|---|
-| `intellij-native-agent-phased-scope.md` | `native-agent-mvp/phased-scope.md` |
-| `native-agent-merged-plan.md` | `archive/2026-09-13-merged-plan/native-agent-merged-plan.md` |
-| `native-agent-merged-plan-review.md` | `archive/2026-09-13-merged-plan/native-agent-merged-plan-review.md` |
-| `ij_native_coding_agent_plan.md` | `archive/2026-09-13-hardened-plan/ij_native_coding_agent_plan.md` |
-| `ij_native_agent_strip_plan.md` | `archive/2026-09-13-strip-plan/ij_native_agent_strip_plan.md` |
-| `plans/` | Removed. Contents are in `archive/`. |
+- The donor runtime was deliberately removed on this branch before any dogfood Go. DONOR_SUBTRACTION and roadmap milestone 7 in `product.md` still say "after Go" and need an owner decision.
+- `design.md` says "`close` is the only idempotent lifecycle operation", but `stop` is also idempotent in `spec.json` and the code.
+- `design.md` Java surface table uses ambiguous names (`Id`, `Handle`, three rows named `Snapshot`, `CallBatch.of`) instead of the real nested types (`Call.Id`, `Batch.Handle`, `Lifecycle.Snapshot`, `Batch.Snapshot`, `Call.Snapshot`, `Call.Batch.of`).
+- The ignored `.agent-work/archive/` still holds the 2026-09-13 hardened, strip and merged plans. They are historical and not referenced here.
