@@ -105,6 +105,5 @@ fixtures/dotnet/.idea/.idea.dotnet/
 
 # Local agent metadata & configs
 .mcp.json
-skills-lock.json
 .omp/
 .zcode/
