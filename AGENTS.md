@@ -179,15 +179,20 @@ When a PR has review comments, for **each comment thread**:
 **Never leave threads in the "pending" state** after replying. The reply explains the decision; the
 resolve signal tells reviewers the thread is closed. Both are required.
 
-# AI Identity and Transparency
+# Commit and PR Identity
 
-When AI agents author or open GitHub content, the identity must be transparent — reviewers and auditors should be able
-to tell at a glance whether work was done by a human or an agent.
+Commit metadata records the identity responsible for the committed diff. It does not make dependencies, operating-system
+components, libraries, tools, or their authors co-authors. Do not add `Co-authored-by` trailers for code that was merely
+used, consulted, executed, or included as a dependency.
 
-**Commit author** — Every commit authored by an AI agent must use the agent's non-personal identity, not a human's
-personal email. The commit hook enforces this automatically via `enforce-commit-author.sh`:
-`github-copilot-developer <github-copilot-developer@users.noreply.github.com>` for Copilot CLI sessions. Do not amend
-commits to substitute a human email for AI-authored changes.
+**Commit author** — Preserve the repository's explicitly configured commit identity. Coding agents must not replace it with
+their model name, agent name, CLI name, dependency author, or an invented bot identity. Before committing, inspect the
+configured identity and verify the resulting author and committer with `git log -1`. If a repository hook
+(`enforce-commit-author.sh`) rewrites or rejects the identity, report the mismatch and stop; do not guess, silently rewrite,
+or add attribution trailers.
+
+A coding agent may commit only when the repository identity policy and hook provide an explicit author/committer identity.
+If no such identity is configured, leave the changes uncommitted and report the prerequisite.
 
 **PR opener** — Pull requests created by agents must be opened using the bot identity (e.g. `agentbridge-fixer[bot]`),
 not the repository owner's personal account. Use the `GH_TOKEN` injection hook (`enforce-gh-bot-identity.js`) which
