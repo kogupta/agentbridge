@@ -33,8 +33,8 @@ public final class RunSession {
         Objects.requireNonNull(now, "now");
         Objects.requireNonNull(timeSource, "timeSource");
         RunLifecycle.StartRunResult started = lifecycle.startRun();
-        if (started instanceof RunLifecycle.StartRunResult.Rejected rejected) {
-            return new StartResult.Rejected(rejected.reason());
+        if (started instanceof RunLifecycle.StartRunResult.Rejected(var reason)) {
+            return new StartResult.Rejected(reason);
         }
         RunHandle handle = ((RunLifecycle.StartRunResult.Started) started).run();
         ActiveRun run = new ActiveRun(ownerKey, handle, new RunLimits.Budget(limits, now), timeSource);
@@ -117,7 +117,7 @@ public final class RunSession {
         requireCurrent(run);
         if (phase == Phase.STOPPING) return new CallStep.Stopped();
         if (phase != Phase.EXECUTING_TOOLS) throw new IllegalStateException("Call step requires EXECUTING_TOOLS");
-        PlannedCall next = run.plan.stream().filter(call -> !run.results.containsKey(call.id())).findFirst().orElse(null);
+        PlannedCall next = nextResult(run);
         if (next == null) {
             Batch.Snapshot snapshot = batchSnapshot(run);
             if (!snapshot.isSettled()) throw new IllegalStateException("Domain results completed before lifecycle batch settled");
@@ -167,8 +167,8 @@ public final class RunSession {
             cancellationFailure = failure;
         }
         RunLifecycle.StopResult stopped = lifecycle.stop(run.handle);
-        if (stopped instanceof RunLifecycle.StopResult.Rejected rejected) {
-            throw new IllegalStateException("Current lifecycle run was rejected: " + rejected.reason());
+        if (stopped instanceof RunLifecycle.StopResult.Rejected(var reason)) {
+            throw new IllegalStateException("Current lifecycle run was rejected: " + reason);
         }
         phase = Phase.STOPPING;
         provisional = null;
@@ -189,8 +189,8 @@ public final class RunSession {
         requireCurrent(run);
         run.resources.cancel();
         RunLifecycle.FinishRunResult result = lifecycle.finishRun(run.handle);
-        if (result instanceof RunLifecycle.FinishRunResult.Rejected rejected) {
-            return new FinishResult.Pending(rejected.reason());
+        if (result instanceof RunLifecycle.FinishRunResult.Rejected(var reason)) {
+            return new FinishResult.Pending(reason);
         }
         current = null;
         provisional = null;
@@ -234,13 +234,14 @@ public final class RunSession {
     private void beginBatch(ActiveRun run, List<PlannedCall> calls) {
         RunLifecycle.BeginBatchResult result = lifecycle.beginBatch(run.handle,
             Call.Batch.of(calls.stream().map(PlannedCall::id).toList()));
-        if (!(result instanceof RunLifecycle.BeginBatchResult.Begun begun)) {
+        if (!(result instanceof RunLifecycle.BeginBatchResult.Begun(var batch))) {
             throw new IllegalStateException("Validated call batch was rejected: "
                 + ((RunLifecycle.BeginBatchResult.Rejected) result).reason());
         }
-        run.batch = begun.batch();
+        run.batch = batch;
         run.plan = List.copyOf(calls);
         run.results.clear();
+        run.nextResultIndex = 0;
     }
 
     private CallAdmission admission(ActiveRun run, PlannedCall call, boolean countsAsTool) {
@@ -249,19 +250,23 @@ public final class RunSession {
     }
 
     private void appendResult(ActiveRun run, RunMessage.ToolResult result) {
-        PlannedCall expected = run.plan.stream().filter(call -> !run.results.containsKey(call.id())).findFirst()
-            .orElseThrow(() -> new IllegalStateException("No unsettled call accepts a result"));
+        PlannedCall expected = nextResult(run);
+        if (expected == null) throw new IllegalStateException("No unsettled call accepts a result");
         if (!expected.id().equals(result.callId())) throw new IllegalArgumentException("Out-of-order tool result");
         appendTerminalResult(run, expected, result);
     }
 
     private void appendCancelledInOrder(ActiveRun run) {
         while (true) {
-            PlannedCall next = run.plan.stream().filter(call -> !run.results.containsKey(call.id())).findFirst().orElse(null);
+            PlannedCall next = nextResult(run);
             if (next == null || admission(run, next, false).status() != Call.Status.CANCELLED_BEFORE_START) return;
             appendTerminalResult(run, next, new RunMessage.ToolResult(next.id(),
                 new ToolOutcome.NotStarted(run.pendingReason, run.pendingMessage)));
         }
+    }
+
+    private PlannedCall nextResult(ActiveRun run) {
+        return run.nextResultIndex < run.plan.size() ? run.plan.get(run.nextResultIndex) : null;
     }
 
     private void appendTerminalResult(ActiveRun run, PlannedCall expected, RunMessage.ToolResult result) {
@@ -270,18 +275,14 @@ public final class RunSession {
         if (run.results.putIfAbsent(result.callId(), result) != null) {
             throw new IllegalStateException("Duplicate tool result");
         }
+        run.nextResultIndex++;
         accepted.add(result);
     }
 
     private Batch.Snapshot batchSnapshot(ActiveRun run) {
         RunLifecycle.BatchSnapshotResult result = lifecycle.batchSnapshot(run.batch);
-        if (result instanceof RunLifecycle.BatchSnapshotResult.Available available) return available.snapshot();
+        if (result instanceof RunLifecycle.BatchSnapshotResult.Available(var snapshot)) return snapshot;
         throw new IllegalStateException("Current lifecycle batch became stale");
-    }
-
-    private PlannedCall planned(ActiveRun run, Call.Id id) {
-        return run.plan.stream().filter(call -> call.id().equals(id)).findFirst()
-            .orElseThrow(() -> new IllegalStateException("Lifecycle call is absent from domain plan"));
     }
 
     private void finishLifecycle(ActiveRun run) {
@@ -316,6 +317,7 @@ public final class RunSession {
         private final RunResources resources = new RunResources();
         private Batch.Handle batch;
         private List<PlannedCall> plan = List.of();
+        private int nextResultIndex;
         private final Map<Call.Id, RunMessage.ToolResult> results = new LinkedHashMap<>();
 
         private ToolOutcome.Reason pendingReason = ToolOutcome.Reason.CANCELLED_NOT_STARTED;

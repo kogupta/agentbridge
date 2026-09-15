@@ -1,19 +1,16 @@
 package com.github.catatafishen.agentbridge.nativeagent.run.cache;
 
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalInt;
+import com.github.catatafishen.agentbridge.nativeagent.Model;
 import com.github.catatafishen.agentbridge.nativeagent.run.session.RunMessage;
 import com.github.catatafishen.agentbridge.nativeagent.run.session.RunSession;
 
 public final class CacheGeneration {
     private final Id id;
-    private final PrefixFingerprint fingerprint;
     private final CacheReset reset;
     private final List<RunMessage> accepted = new ArrayList<>();
     private final CachePrefixGuard guard = new CachePrefixGuard();
@@ -29,7 +26,6 @@ public final class CacheGeneration {
         fields.forEach(field -> headParts.add(new CacheRequest.Part(
             CacheRequest.Component.HEAD, field, OptionalInt.empty())));
         this.current = new CacheRequest(id, headParts);
-        this.fingerprint = PrefixFingerprint.from(current.ownedBytes());
     }
 
     public static CacheGeneration initial(Id id, List<CacheField> head) {
@@ -78,7 +74,6 @@ public final class CacheGeneration {
     }
 
     public Id id() { return id; }
-    public PrefixFingerprint fingerprint() { return fingerprint; }
     public CacheReset reset() { return reset; }
     public synchronized Optional<CachePrefixGuard.Observation> lastObservation() {
         return Optional.ofNullable(lastObservation);
@@ -91,34 +86,18 @@ public final class CacheGeneration {
         }
     }
 
-    public static final class PrefixFingerprint {
-        private final byte[] digest;
-        private PrefixFingerprint(byte[] digest) { this.digest = digest; }
-        static PrefixFingerprint from(byte[] input) {
-            try {
-                return new PrefixFingerprint(MessageDigest.getInstance("SHA-256").digest(input));
-            } catch (NoSuchAlgorithmException impossible) {
-                throw new AssertionError(impossible);
-            }
-        }
-        public byte[] digest() { return Arrays.copyOf(digest, digest.length); }
-        @Override public boolean equals(Object other) {
-            return other instanceof PrefixFingerprint fingerprint && Arrays.equals(digest, fingerprint.digest);
-        }
-        @Override public int hashCode() { return Arrays.hashCode(digest); }
-    }
-
     public sealed interface CacheReset {
         enum SessionStart implements CacheReset { INSTANCE }
-        record ModelChange(String previousModel, String nextModel) implements CacheReset {
+        record ModelChange(Model previousModel, Model nextModel) implements CacheReset {
             public ModelChange {
                 Objects.requireNonNull(previousModel, "previousModel");
                 Objects.requireNonNull(nextModel, "nextModel");
-                if (previousModel.isBlank() || nextModel.isBlank() || previousModel.equals(nextModel)) {
-                    throw new IllegalArgumentException("ModelChange requires distinct nonblank models");
+                if (previousModel.equals(nextModel)) {
+                    throw new IllegalArgumentException("ModelChange requires distinct model configurations");
                 }
             }
         }
         enum ExplicitContextReset implements CacheReset { INSTANCE }
     }
+
 }

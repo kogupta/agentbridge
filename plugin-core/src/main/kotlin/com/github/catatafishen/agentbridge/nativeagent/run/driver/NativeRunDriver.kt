@@ -2,11 +2,9 @@ package com.github.catatafishen.agentbridge.nativeagent.run.driver
 
 import com.github.catatafishen.agentbridge.nativeagent.lifecycle.Call
 import com.github.catatafishen.agentbridge.nativeagent.run.cache.CacheGeneration
-import com.github.catatafishen.agentbridge.nativeagent.run.cache.CachePrefixViolation
 import com.github.catatafishen.agentbridge.nativeagent.run.cache.ModelItemRenderer
 import com.github.catatafishen.agentbridge.nativeagent.run.policy.RetryPolicy
 import com.github.catatafishen.agentbridge.nativeagent.run.policy.RunLimits
-import com.github.catatafishen.agentbridge.nativeagent.run.resources.RunCancellation
 import com.github.catatafishen.agentbridge.nativeagent.run.session.CallAdmission
 import com.github.catatafishen.agentbridge.nativeagent.run.session.PlannedCall
 import com.github.catatafishen.agentbridge.nativeagent.run.session.RunMessage
@@ -119,7 +117,7 @@ internal class NativeRunDriver(
         while (true) {
             val attempt = transport.request(
                 request,
-                ProvisionalSink { text -> session.tryUpdateProvisional(run, text) },
+                { text -> session.tryUpdateProvisional(run, text) },
                 run.resources(),
             )
             when (attempt) {

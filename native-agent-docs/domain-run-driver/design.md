@@ -78,7 +78,7 @@ void dispose()
 
 ## Prompt-cache surface and algorithm
 
-`CacheGeneration.initial(id, headFields)` is the only `SessionStart` path. `CacheGeneration.replacement(previousSession, reset, id, headFields)` accepts only `ModelChange` or `ExplicitContextReset` and rejects unless `previousSession.phase()` is `IDLE`. The previous generation is never mutated or relabeled.
+`CacheGeneration.initial(id, headFields)` is the only `SessionStart` path. `CacheGeneration.replacement(previousSession, reset, id, headFields)` accepts only `ModelChange` or `ExplicitContextReset` and rejects unless `previousSession.phase()` is `IDLE`. `ModelChange` carries validated native-agent `Model` values: a `provider/name` `Model.Id` and a `ReasoningEffort`. The previous generation is never mutated or relabeled.
 
 `requestFor(history, renderer)` compares the immutable accepted-message prefix with its stored ownership list. Shortening, replacement, or reordering throws. Only the unseen tail is passed to `ModelItemRenderer`; each returned `CacheField` is copied once and retained with its input index. The generation extends the prior byte array with those stored field bytes. An unchanged history returns the same `CacheRequest` instance, so a retry cannot rerender or change bytes.
 

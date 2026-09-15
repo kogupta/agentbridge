@@ -1,5 +1,6 @@
 package com.github.catatafishen.agentbridge.nativeagent.run.cache;
 
+import com.github.catatafishen.agentbridge.nativeagent.Model;
 import com.github.catatafishen.agentbridge.nativeagent.lifecycle.Call;
 import com.github.catatafishen.agentbridge.nativeagent.run.policy.RunLimits;
 import com.github.catatafishen.agentbridge.nativeagent.run.session.CallAdmission;
@@ -39,7 +40,9 @@ class PromptCacheTest {
         prior.acceptTurn(active, new ValidatedAssistantTurn.Complete(
             new RunMessage.Assistant("done", RunMessage.Completion.COMPLETE, List.of())));
         CacheGeneration modelChange = CacheGeneration.replacement(prior,
-            new CacheGeneration.CacheReset.ModelChange("model-a", "model-b"),
+            new CacheGeneration.CacheReset.ModelChange(
+                new Model(Model.Id.parse("openai/model-a"), Model.ReasoningEffort.MEDIUM),
+                new Model(Model.Id.parse("openai/model-b"), Model.ReasoningEffort.HIGH)),
             new CacheGeneration.Id("model-change"), head());
         CacheGeneration explicit = CacheGeneration.replacement(prior,
             CacheGeneration.CacheReset.ExplicitContextReset.INSTANCE,
@@ -47,6 +50,12 @@ class PromptCacheTest {
         assertInstanceOf(CacheGeneration.CacheReset.ModelChange.class, modelChange.reset());
         assertEquals(CacheGeneration.CacheReset.ExplicitContextReset.INSTANCE, explicit.reset());
         assertNotEquals(initial.id(), modelChange.id());
+        CacheGeneration.CacheReset.ModelChange reset =
+            (CacheGeneration.CacheReset.ModelChange) modelChange.reset();
+        assertEquals("openai/model-a", reset.previousModel().id().value());
+        assertEquals(Model.ReasoningEffort.HIGH, reset.nextModel().effort());
+        assertThrows(IllegalArgumentException.class, () -> Model.Id.parse("model-a"));
+        assertThrows(IllegalArgumentException.class, () -> Model.Id.parse("openai/model/a"));
         assertThrows(IllegalArgumentException.class, () -> CacheGeneration.replacement(prior,
             CacheGeneration.CacheReset.SessionStart.INSTANCE,
             new CacheGeneration.Id("invalid"), head()));
@@ -253,7 +262,7 @@ class PromptCacheTest {
     }
 
     private static int headLength() {
-        return head().stream().mapToInt(field -> field.bytes().length).sum();
+        return head().stream().mapToInt(CacheField::size).sum();
     }
 
     private static CacheGeneration generation(String id) {

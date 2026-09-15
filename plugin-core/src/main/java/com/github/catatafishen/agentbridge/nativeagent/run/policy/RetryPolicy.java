@@ -23,7 +23,7 @@ public final class RetryPolicy {
     public record Failure(FailureKind kind, Optional<Duration> retryAfter) {
         public Failure {
             Objects.requireNonNull(kind, "kind");
-            retryAfter = Objects.requireNonNull(retryAfter, "retryAfter");
+            Objects.requireNonNull(retryAfter, "retryAfter");
             if (kind != FailureKind.RATE_LIMIT && retryAfter.isPresent()) {
                 throw new IllegalArgumentException("Retry-After belongs only to rate-limit failures");
             }
@@ -51,7 +51,7 @@ public final class RetryPolicy {
             }
         }
         record RateLimitWait(Optional<Duration> requested) implements Decision {
-            public RateLimitWait { requested = Objects.requireNonNull(requested, "requested"); }
+            public RateLimitWait { Objects.requireNonNull(requested, "requested"); }
         }
         record NoRetry() implements Decision { }
     }

@@ -31,7 +31,7 @@ public final class CachePrefixGuard {
 
     public record Observation(int previousBytes, int candidateBytes, int reusedBytes) {
         public Observation {
-            if (previousBytes < 0 || candidateBytes < 0 || reusedBytes < 0 || reusedBytes > previousBytes) {
+            if (candidateBytes < 0 || reusedBytes < 0 || reusedBytes > previousBytes) {
                 throw new IllegalArgumentException("Invalid cache reuse observation");
             }
         }

@@ -42,7 +42,6 @@ public final class RunResources {
         if (failure != null) throw failure;
     }
 
-    public synchronized boolean isSettled() { return cancelled && entries.isEmpty(); }
 
     private void close(Entry entry) {
         synchronized (this) { entries.remove(entry); }

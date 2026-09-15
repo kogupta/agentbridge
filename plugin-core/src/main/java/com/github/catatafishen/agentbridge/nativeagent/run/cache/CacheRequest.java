@@ -53,7 +53,6 @@ public final class CacheRequest {
     public CacheGeneration.Id generation() { return generation; }
     public byte[] bytes() { return Arrays.copyOf(bytes, bytes.length); }
     public int length() { return bytes.length; }
-    public List<ComponentRange> components() { return components; }
 
     ComponentRange componentAt(int offset) {
         if (components.isEmpty()) throw new IllegalStateException("Cache request has no components");

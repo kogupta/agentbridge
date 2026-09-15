@@ -40,8 +40,8 @@ public final class CallAdmission {
             holder.effectStarted = true;
             effect.execute();
         });
-        if (execution instanceof RunLifecycle.ExecutionResult.Rejected rejected) {
-            return new Result.Rejected(rejected.reason());
+        if (execution instanceof RunLifecycle.ExecutionResult.Rejected(var reason)) {
+            return new Result.Rejected(reason);
         }
         if (holder.budgetAdmission != null && holder.budgetAdmission != RunLimits.Admission.ADMITTED) {
             return new Result.Limited(holder.budgetAdmission);
@@ -52,11 +52,11 @@ public final class CallAdmission {
 
     public Call.Status status() {
         RunLifecycle.BatchSnapshotResult result = lifecycle.batchSnapshot(batch);
-        if (!(result instanceof RunLifecycle.BatchSnapshotResult.Available available)) {
+        if (!(result instanceof RunLifecycle.BatchSnapshotResult.Available(var snapshot))) {
             throw new IllegalStateException("Call admission batch is stale");
         }
-        return available.snapshot().calls().stream()
-            .filter(snapshot -> snapshot.call().equals(call))
+        return snapshot.calls().stream()
+            .filter(callSnapshot -> callSnapshot.call().equals(call))
             .findFirst()
             .orElseThrow(() -> new IllegalStateException("Call admission identity is absent"))
             .status();

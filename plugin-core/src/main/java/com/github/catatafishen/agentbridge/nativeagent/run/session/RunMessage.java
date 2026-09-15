@@ -1,7 +1,6 @@
 package com.github.catatafishen.agentbridge.nativeagent.run.session;
 
 import com.github.catatafishen.agentbridge.nativeagent.lifecycle.Call;
-import com.github.catatafishen.agentbridge.nativeagent.run.session.PlannedCall;
 
 import java.util.List;
 import java.util.Objects;
