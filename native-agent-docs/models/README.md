@@ -42,7 +42,7 @@ The script finds its targets in the model files. Raw output goes to `.agent-work
 ## Conventions
 
 - `agent_coarse` holds its state in one record `s`. `prev` is the pre-state of the last step, and every action, mutants included, sets `prev' = s`. Transition invariants compare `prev` with `s`.
-- A batch in `agent_coarse` has at most two calls, held in the fixed slots `slot0` and `slot1`. Call key = `10*run + localId`.
+- A batch in `agent_coarse` has at most three calls, held in the fixed slots `slot0`, `slot1` and `slot2`. Call key = `10*run + localId`.
 - `read_execution` assigns every variable in every action.
 - ITF traces label state 0 with the step action name (for example `stepCorpus`), not `init`.
 

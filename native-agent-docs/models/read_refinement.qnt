@@ -23,10 +23,12 @@ module read_refinement {
 
   val projectView: str =
     if (B::refused or (B::cancelled and B::computation == "IDLE")) "cancelled_before_start"
-    else if (B::settled)
-      (if (B::resultReady or B::computation == "TIMED_OUT") "completed" else "failed_after_start")
-    else if (B::computation != "IDLE") "executing"
-    else "not_requested"
+    else if (B::cancelled) "failed_after_start"
+    else if (B::settled and (B::resultReady or B::computation == "TIMED_OUT")) "completed"
+    else if (B::computation == "ABORTED") "failed_after_start"
+    else if (B::computation == "RUNNING" or B::computation == "DONE" or B::computation == "TIMED_OUT") "executing"
+    else if (B::computation == "IDLE") "not_requested"
+    else "invalid_computation"
 
   val REF_R = I::legalEffectTransition(prevView, view)
 

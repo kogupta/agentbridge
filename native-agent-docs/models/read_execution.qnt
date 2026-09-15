@@ -8,7 +8,7 @@ module read_execution {
   // carry identical update effects.
 
   pure val INDEX_BOUND: int = 2  // abstract smart-wait ticks
-  pure val MAX_RESTARTS: int = 2 // write-action restarts per read
+  pure val MAX_RESTARTS: int = 3 // write-action restarts per read
   pure val MAX_EDITS: int = 2    // document edits per read (docVersion bound)
   pure val MAX_DUMB: int = 2     // dumb-mode entries per read (psiCount bound)
 
@@ -28,7 +28,10 @@ module read_execution {
   var blockedBeforeRegister: bool // cancel or dispose happened before registration
   var settled: bool             // the effect returned
   var computeWasCommitted: bool // documents were committed at compute time
+  var resultVersion: int       // document version captured by the returned result
+  var resultContent: int       // abstract deterministic content fingerprint
   var indexNotReady: bool       // dumb mode outlasted the bound
+  var indexExceptionOccurred: bool // escaped IndexNotReadyException terminal cause
 
   action init = all {
     registry' = "LIVE",
@@ -48,6 +51,9 @@ module read_execution {
     settled' = false,
     computeWasCommitted' = false,
     indexNotReady' = false,
+    resultVersion' = 0,
+    resultContent' = 0,
+    indexExceptionOccurred' = false,
   }
 
   action startRead = all {
@@ -71,6 +77,9 @@ module read_execution {
     settled' = false,
     computeWasCommitted' = false,
     indexNotReady' = false,
+    resultVersion' = 0,
+    resultContent' = 0,
+    indexExceptionOccurred' = false,
   }
 
   action refuseRead = all {
@@ -93,6 +102,9 @@ module read_execution {
     settled' = settled,
     computeWasCommitted' = computeWasCommitted,
     indexNotReady' = indexNotReady,
+    resultVersion' = resultVersion,
+    resultContent' = resultContent,
+    indexExceptionOccurred' = indexExceptionOccurred,
   }
 
   action smartWaitTick = all {
@@ -117,6 +129,9 @@ module read_execution {
     blockedBeforeRegister' = blockedBeforeRegister,
     settled' = settled,
     computeWasCommitted' = computeWasCommitted,
+    resultVersion' = resultVersion,
+    resultContent' = resultContent,
+    indexExceptionOccurred' = indexExceptionOccurred,
   }
 
   action dumbEnter = all {
@@ -140,6 +155,9 @@ module read_execution {
     settled' = settled,
     computeWasCommitted' = computeWasCommitted,
     indexNotReady' = indexNotReady,
+    resultVersion' = resultVersion,
+    resultContent' = resultContent,
+    indexExceptionOccurred' = indexExceptionOccurred,
   }
 
   action dumbExit = all {
@@ -161,9 +179,13 @@ module read_execution {
     settled' = settled,
     computeWasCommitted' = computeWasCommitted,
     indexNotReady' = indexNotReady,
+    resultVersion' = resultVersion,
+    resultContent' = resultContent,
+    indexExceptionOccurred' = indexExceptionOccurred,
   }
 
   action editDocument = all {
+    computation == "IDLE" or computation == "RUNNING",
     docVersion < MAX_EDITS,
     docCommitted' = false,
     docVersion' = docVersion + 1,
@@ -182,6 +204,9 @@ module read_execution {
     settled' = settled,
     computeWasCommitted' = computeWasCommitted,
     indexNotReady' = indexNotReady,
+    resultVersion' = resultVersion,
+    resultContent' = resultContent,
+    indexExceptionOccurred' = indexExceptionOccurred,
   }
 
   action commitDocuments = all {
@@ -202,6 +227,9 @@ module read_execution {
     settled' = settled,
     computeWasCommitted' = computeWasCommitted,
     indexNotReady' = indexNotReady,
+    resultVersion' = resultVersion,
+    resultContent' = resultContent,
+    indexExceptionOccurred' = indexExceptionOccurred,
   }
 
   action writeAction = all {
@@ -225,6 +253,9 @@ module read_execution {
     settled' = settled,
     computeWasCommitted' = computeWasCommitted,
     indexNotReady' = indexNotReady,
+    resultVersion' = resultVersion,
+    resultContent' = resultContent,
+    indexExceptionOccurred' = indexExceptionOccurred,
   }
 
   action compute = all {
@@ -234,7 +265,7 @@ module read_execution {
     registry == "LIVE",
     not(indexNotReady),
     computation' = "DONE",
-    resultReady' = true,
+    resultReady' = false,
     computeWasCommitted' = true,
     platformAccessed' = true,
     registry' = registry,
@@ -250,10 +281,13 @@ module read_execution {
     blockedBeforeRegister' = blockedBeforeRegister,
     settled' = settled,
     indexNotReady' = indexNotReady,
+    resultVersion' = docVersion,
+    resultContent' = docVersion,
+    indexExceptionOccurred' = indexExceptionOccurred,
   }
 
   action register = all {
-    resultReady,
+    computation == "DONE",
     not(cancelled),
     not(blockedBeforeRegister),
     registry == "LIVE",
@@ -266,7 +300,7 @@ module read_execution {
     waitClock' = waitClock,
     restarts' = restarts,
     computation' = computation,
-    resultReady' = resultReady,
+    resultReady' = true,
     cancelled' = cancelled,
     refused' = refused,
     platformAccessed' = platformAccessed,
@@ -274,6 +308,9 @@ module read_execution {
     settled' = settled,
     computeWasCommitted' = computeWasCommitted,
     indexNotReady' = indexNotReady,
+    resultVersion' = resultVersion,
+    resultContent' = resultContent,
+    indexExceptionOccurred' = indexExceptionOccurred,
   }
 
   action disposeRegistry = all {
@@ -285,20 +322,24 @@ module read_execution {
     psiCount' = psiCount,
     waitClock' = waitClock,
     restarts' = restarts,
-    computation' = computation,
-    resultReady' = resultReady,
-    registered' = registered,
-    cancelled' = cancelled,
+    computation' = if (not(settled) and (computation == "RUNNING" or computation == "DONE")) "ABORTED" else computation,
+    resultReady' = if (not(settled)) false else resultReady,
+    registered' = if (not(settled)) false else registered,
+    cancelled' = if (not(settled) and computation != "TIMED_OUT") true else cancelled,
     refused' = refused,
     platformAccessed' = platformAccessed,
     settled' = settled,
     computeWasCommitted' = computeWasCommitted,
     indexNotReady' = indexNotReady,
+    resultVersion' = resultVersion,
+    resultContent' = resultContent,
+    indexExceptionOccurred' = indexExceptionOccurred,
   }
 
   action cancel = all {
-    not(cancelled),
-    not(settled),
+    settled == false,
+    cancelled == false,
+    computation != "TIMED_OUT",
     cancelled' = true,
     blockedBeforeRegister' = (blockedBeforeRegister or not(registered)),
     registry' = registry,
@@ -308,15 +349,19 @@ module read_execution {
     psiCount' = psiCount,
     waitClock' = waitClock,
     restarts' = restarts,
-    computation' = computation,
-    resultReady' = resultReady,
-    registered' = registered,
+    computation' = if (computation == "RUNNING" or computation == "DONE") "ABORTED" else computation,
+    resultReady' = false,
+    registered' = false,
     refused' = refused,
     platformAccessed' = platformAccessed,
     settled' = settled,
     computeWasCommitted' = computeWasCommitted,
     indexNotReady' = indexNotReady,
+    resultVersion' = resultVersion,
+    resultContent' = resultContent,
+    indexExceptionOccurred' = indexExceptionOccurred,
   }
+
 
   // Cancel or registry disposal terminates a running computation without a result.
   action abortComputation = all {
@@ -339,6 +384,37 @@ module read_execution {
     settled' = settled,
     computeWasCommitted' = computeWasCommitted,
     indexNotReady' = indexNotReady,
+    resultVersion' = resultVersion,
+    resultContent' = resultContent,
+    indexExceptionOccurred' = indexExceptionOccurred,
+  }
+
+  // IndexNotReadyException can escape the read computation before the wait
+  // bound. It is terminal and never exposes a partial result.
+  action indexException = all {
+    computation == "RUNNING",
+    not(cancelled),
+    waitClock < INDEX_BOUND,
+    computation' = "TIMED_OUT",
+    resultReady' = false,
+    registered' = false,
+    indexNotReady' = true,
+    registry' = registry,
+    docCommitted' = docCommitted,
+    docVersion' = docVersion,
+    dumbMode' = dumbMode,
+    psiCount' = psiCount,
+    waitClock' = waitClock,
+    restarts' = restarts,
+    cancelled' = cancelled,
+    refused' = refused,
+    platformAccessed' = true,
+    blockedBeforeRegister' = blockedBeforeRegister,
+    settled' = settled,
+    computeWasCommitted' = computeWasCommitted,
+    resultVersion' = resultVersion,
+    resultContent' = resultContent,
+    indexExceptionOccurred' = true,
   }
 
   action settle = all {
@@ -361,12 +437,16 @@ module read_execution {
     blockedBeforeRegister' = blockedBeforeRegister,
     computeWasCommitted' = computeWasCommitted,
     indexNotReady' = indexNotReady,
+    resultVersion' = resultVersion,
+    resultContent' = resultContent,
+    indexExceptionOccurred' = indexExceptionOccurred,
   }
 
   action step = any {
     startRead,
     refuseRead,
     smartWaitTick,
+    indexException,
     dumbEnter,
     dumbExit,
     editDocument,
@@ -383,14 +463,21 @@ module read_execution {
   // ---- Invariants ----
 
   val INV_R1 = not(registered and blockedBeforeRegister)
+    and not(cancelled and resultReady)
   val INV_R2 = not(settled) or computation == "DONE" or computation == "ABORTED" or computation == "TIMED_OUT"
   val INV_R3 = not(refused and platformAccessed)
-  // INDEX_NOT_READY only at the bound, as the terminal outcome, with no result.
+  // INDEX_NOT_READY is either the bounded wait result or an escaped
+  // IndexNotReadyException before the bound.
   val INV_R4 =
     waitClock <= INDEX_BOUND
-      and (indexNotReady implies (computation == "TIMED_OUT" and not(resultReady) and waitClock == INDEX_BOUND))
-  val INV_R5 = not(resultReady) or computeWasCommitted
-
+      and (indexNotReady implies
+        (computation == "TIMED_OUT" and not(resultReady)
+          and ((indexExceptionOccurred and waitClock < INDEX_BOUND)
+            or (not(indexExceptionOccurred) and waitClock == INDEX_BOUND))))
+  val INV_R5 =
+    not(resultReady)
+      or (computeWasCommitted and computation == "DONE" and docCommitted
+          and not(cancelled) and resultVersion == docVersion and resultContent == docVersion)
   // ---- Witnesses ----
 
   val W_RESTART = restarts > 0 and settled and resultReady
@@ -402,8 +489,9 @@ module read_execution {
   // ---- Mutant fault actions (used only by mutants/<INV>.qnt) ----
 
   action mut_registerIgnoringCancel = all {
-    resultReady,
+    resultReady or cancelled,
     registered' = true,
+    resultReady' = true,
     registry' = registry,
     docCommitted' = docCommitted,
     docVersion' = docVersion,
@@ -412,7 +500,6 @@ module read_execution {
     waitClock' = waitClock,
     restarts' = restarts,
     computation' = computation,
-    resultReady' = resultReady,
     cancelled' = cancelled,
     refused' = refused,
     platformAccessed' = platformAccessed,
@@ -420,6 +507,9 @@ module read_execution {
     settled' = settled,
     computeWasCommitted' = computeWasCommitted,
     indexNotReady' = indexNotReady,
+    resultVersion' = resultVersion,
+    resultContent' = resultContent,
+    indexExceptionOccurred' = indexExceptionOccurred,
   }
 
   action mut_settleEarly = all {
@@ -441,6 +531,9 @@ module read_execution {
     blockedBeforeRegister' = blockedBeforeRegister,
     computeWasCommitted' = computeWasCommitted,
     indexNotReady' = indexNotReady,
+    resultVersion' = resultVersion,
+    resultContent' = resultContent,
+    indexExceptionOccurred' = indexExceptionOccurred,
   }
 
   action mut_accessAfterRefusal = all {
@@ -462,6 +555,9 @@ module read_execution {
     settled' = settled,
     computeWasCommitted' = computeWasCommitted,
     indexNotReady' = indexNotReady,
+    resultVersion' = resultVersion,
+    resultContent' = resultContent,
+    indexExceptionOccurred' = indexExceptionOccurred,
   }
 
   action mut_returnPastBound = all {
@@ -485,8 +581,11 @@ module read_execution {
     blockedBeforeRegister' = blockedBeforeRegister,
     settled' = settled,
     computeWasCommitted' = computeWasCommitted,
-  }
+    resultVersion' = resultVersion,
+    resultContent' = resultContent,
+    indexExceptionOccurred' = indexExceptionOccurred,
 
+  }
   action mut_computeUncommitted = all {
     computation == "RUNNING",
     not(cancelled),
@@ -509,6 +608,9 @@ module read_execution {
     blockedBeforeRegister' = blockedBeforeRegister,
     settled' = settled,
     indexNotReady' = indexNotReady,
+    resultVersion' = resultVersion,
+    resultContent' = resultContent,
+    indexExceptionOccurred' = indexExceptionOccurred,
   }
 
   action mut_unsettle = all {
@@ -531,6 +633,9 @@ module read_execution {
     blockedBeforeRegister' = blockedBeforeRegister,
     computeWasCommitted' = computeWasCommitted,
     indexNotReady' = indexNotReady,
+    resultVersion' = resultVersion,
+    resultContent' = resultContent,
+    indexExceptionOccurred' = indexExceptionOccurred,
   }
 
   // Mutant steps: check with --step=step_mut_<INV> --invariant=<INV>; a counterexample

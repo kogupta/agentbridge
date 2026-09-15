@@ -132,7 +132,7 @@ Each base module also defines one mutant step per invariant (`step_mut_<INV>`). 
 
 ### Coarse model encoding
 
-`agent_coarse` holds its state in one record variable `s`. The variable `prev` holds the pre-state of the last step, and every action, mutants included, sets `prev' = s`. Invariants C2, C5 and C6 are transition properties over `prev` and `s`. A batch has at most two calls, held in two fixed slots with plain fields.
+`agent_coarse` holds its state in one record variable `s`. The variable `prev` holds the pre-state of the last step, and every action, mutants included, sets `prev' = s`. Invariants C2, C5 and C6 are transition properties over `prev` and `s`. A batch has at most three calls, held in three fixed slots with plain fields.
 
 Owners (Java):
 

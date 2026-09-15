@@ -52,6 +52,26 @@ class RunDomainTest {
     }
 
     @Test
+    void reusedCallIdIsRejectedBeforeAssistantHistoryCommit() {
+        RunSession session = new RunSession();
+        RunSession.ActiveRun run = started(session);
+        PlannedCall.Executable first = executable("same");
+        RunMessage.Assistant turn = assistant("", RunMessage.Completion.COMPLETE, List.of(first));
+
+        session.acceptTurn(run, new ValidatedAssistantTurn.Complete(turn));
+        RunSession.CallStep.Execute call = assertInstanceOf(RunSession.CallStep.Execute.class, session.nextCall(run));
+        assertInstanceOf(CallAdmission.Result.Executed.class, call.admission().execute(() -> { }));
+        session.recordToolResult(run, new RunMessage.ToolResult(first.id(),
+            new ToolOutcome.Completed("done", List.of("src/A.java"))));
+        assertInstanceOf(RunSession.CallStep.Complete.class, session.nextCall(run));
+
+        int historySize = session.history().messages().size();
+        assertThrows(IllegalStateException.class,
+            () -> session.acceptTurn(run, new ValidatedAssistantTurn.Complete(turn)));
+        assertEquals(historySize, session.history().messages().size());
+    }
+
+    @Test
     void stopAfterAdmissionRetainsRealResultBeforeCancelledSuccessor() throws Exception {
         RunSession session = new RunSession();
         RunSession.ActiveRun run = started(session);

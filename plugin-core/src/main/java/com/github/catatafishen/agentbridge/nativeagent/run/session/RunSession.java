@@ -90,10 +90,10 @@ public final class RunSession {
         }
 
         RunMessage.Assistant assistant = assistant(turn);
-        run.budget.recordAcceptedResponse();
-        accepted.add(assistant);
         if (turn instanceof ValidatedAssistantTurn.LengthCalls) {
             beginBatch(run, assistant.calls());
+            run.budget.recordAcceptedResponse();
+            accepted.add(assistant);
             for (PlannedCall call : assistant.calls()) {
                 CallAdmission admission = admission(run, call, false);
                 requireExecuted(admission.execute(() -> {}));
@@ -106,9 +106,13 @@ public final class RunSession {
         }
         if (!assistant.calls().isEmpty()) {
             beginBatch(run, assistant.calls());
+            run.budget.recordAcceptedResponse();
+            accepted.add(assistant);
             phase = Phase.EXECUTING_TOOLS;
             return new TurnAcceptance.CallsReady();
         }
+        run.budget.recordAcceptedResponse();
+        accepted.add(assistant);
         finishLifecycle(run);
         return new TurnAcceptance.Ended(history());
     }

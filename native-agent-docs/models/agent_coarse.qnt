@@ -11,19 +11,19 @@ module agent_coarse {
   // State is one record `s`. `prev` is the pre-state of the last step, so
   // invariants can state transition properties over primary state. Every action,
   // mutants included, sets `prev' = s`.
-  //
-  // Encoding for Apalache: a batch has at most two calls, held in two fixed slots
-  // with plain fields. The model has no maps, no folds and no whole-record
+  // Encoding for Apalache: a batch has at most three calls, held in three fixed
+  // slots with plain fields. The model has no maps, no folds and no whole-record
   // comparisons; each of these made the SMT encoding grow too fast to reach 12 steps.
 
   // Finite bounds, recorded in evidence params.
   pure val MAX_TURNS: int = 2        // accepted provider responses per run (RunLimits)
   pure val MAX_RUNS: int = 2         // runs per session
   pure val MAX_GENERATIONS: int = 2  // cache generation replacements
-  // Provider call batches as (first, second) local call IDs; second 0 = one call.
-  // MAX_CALLS = 2. The provider may repeat an ID from an earlier turn of the same
+  // Provider call batches as (first, second, third) local call IDs; zero means unused.
+  // MAX_CALLS = 3. The provider may repeat an ID from an earlier turn of the same
   // run; RunLifecycle rejects it.
-  pure val BATCHES: Set[(int, int)] = Set((1, 0), (2, 0), (1, 2), (2, 1))
+  pure val BATCHES: Set[(int, int, int)] =
+    Set((1, 0, 0), (2, 0, 0), (3, 0, 0), (1, 2, 0), (1, 3, 0), (2, 3, 0), (1, 2, 3))
   // One retry per request (RetryPolicy): `retried` is the retry state.
 
   type Slot = {
@@ -37,6 +37,7 @@ module agent_coarse {
     phase: str,             // RunSession.Phase: IDLE | REQUESTING | EXECUTING_TOOLS | STOPPING | DISPOSED
     lc: str,                // RunLifecycle phase: IDLE | RUNNING | STOPPING | CLOSING | CLOSED
     disposed: bool,
+    registryDisposed: bool,     // content-owned read registry has been disposed
     active: bool,           // RunSession.current != null
     runId: int,             // runs started; also the run ID
     cancelled: bool,        // RunCancellation of the current run
@@ -44,21 +45,24 @@ module agent_coarse {
     provisional: bool,      // provisional text delivered and not cleared
     req: str,               // provider request: NONE | IN_FLIGHT
     retried: bool,
-    turn: str,              // validated turn held by the driver: NONE | TEXT | CALLS
-    turnId0: int,           // local call IDs of a CALLS turn; turnId1 0 = one call
+    turn: str,              // validated turn: NONE | TEXT | CALLS | LENGTH_CALLS
+    turnId0: int,           // local call IDs of a CALLS turn; turnId1/2 0 = unused
     turnId1: int,
+    turnId2: int,
     turns: int,             // accepted responses this run
-    n: int,                 // calls in the current batch, 0..2
+    n: int,                 // calls in the current batch, 0..3
     slot0: Slot,
     slot1: Slot,
+    slot2: Slot,
     nextIndex: int,         // RunSession nextResultIndex
     acceptedIds: Set[int],  // RunLifecycle acceptedCallIds
     startedIds: Set[int],   // call keys whose effect started this run
     cursor: int,            // slot returned by nextCall, -1 when none
-    outcome: str,           // admission of the cursor call: NONE | EXECUTED | LIMITED
+    outcome: str,           // admission: NONE | EXECUTED | LIMITED | REJECTED
     inEffect: int,          // slot whose effect runs, -1 when none
     generation: int,
-    lastRequest: List[int], // history content of the last request in this generation
+    requestHead: int,           // complete serialized instructions/tools fingerprint
+    lastRequest: List[int],     // serialized request input sequence for the last attempt
     requestsInGen: int
   }
 
@@ -71,11 +75,12 @@ module agent_coarse {
   pure val EMPTY_SLOT: Slot = { key: 0, status: "NONE", starts: 0, results: 0 }
 
   pure val INIT: State = {
-    phase: "IDLE", lc: "IDLE", disposed: false, active: false, runId: 0, cancelled: false,
+    phase: "IDLE", lc: "IDLE", disposed: false, registryDisposed: false, active: false, runId: 0, cancelled: false,
     history: [], provisional: false, req: "NONE", retried: false, turn: "NONE",
-    turnId0: 0, turnId1: 0, turns: 0, n: 0, slot0: EMPTY_SLOT, slot1: EMPTY_SLOT,
+    turnId0: 0, turnId1: 0, turnId2: 0, turns: 0, n: 0, slot0: EMPTY_SLOT,
+    slot1: EMPTY_SLOT, slot2: EMPTY_SLOT,
     nextIndex: 0, acceptedIds: Set(), startedIds: Set(), cursor: -1, outcome: "NONE",
-    inEffect: -1, generation: 0, lastRequest: [], requestsInGen: 0
+    inEffect: -1, generation: 0, requestHead: 0, lastRequest: [], requestsInGen: 0
   }
 
   var s: State
@@ -89,26 +94,33 @@ module agent_coarse {
   // ---- Pure helpers ----
 
   pure def isUnsettled(st: str): bool = st == "PENDING" or st == "EXECUTING"
-
   pure def isPrefix(a: List[int], b: List[int]): bool =
     length(a) <= length(b) and a.indices().forall(i => a[i] == b[i])
 
-  pure def slotAt(t: State, i: int): Slot = if (i == 0) t.slot0 else t.slot1
+  pure def slotAt(t: State, i: int): Slot =
+    if (i == 0) t.slot0 else if (i == 1) t.slot1 else t.slot2
 
   pure def withSlot(t: State, i: int, sl: Slot): State =
-    if (i == 0) { ...t, slot0: sl } else { ...t, slot1: sl }
+    if (i == 0) { ...t, slot0: sl } else if (i == 1) { ...t, slot1: sl } else { ...t, slot2: sl }
 
   pure def batchSettled(t: State): bool =
     t.inEffect == -1
       and (t.n <= 0 or not(isUnsettled(t.slot0.status)))
       and (t.n <= 1 or not(isUnsettled(t.slot1.status)))
+      and (t.n <= 2 or not(isUnsettled(t.slot2.status)))
+
+  pure def batchRecorded(t: State): bool =
+    t.n <= 0
+      or (t.slot0.results == 1
+          and (t.n <= 1 or (t.slot1.results == 1
+              and (t.n <= 2 or t.slot2.results == 1))))
 
   pure def cancelSlot(sl: Slot): Slot =
     if (sl.status == "PENDING") { ...sl, status: "CANCELLED_BEFORE_START" } else sl
 
   // Batch.cancelPending: PENDING calls become CANCELLED_BEFORE_START.
   pure def cancelPending(t: State): State =
-    { ...t, slot0: cancelSlot(t.slot0), slot1: cancelSlot(t.slot1) }
+    { ...t, slot0: cancelSlot(t.slot0), slot1: cancelSlot(t.slot1), slot2: cancelSlot(t.slot2) }
 
   // RunSession.appendCancelledInOrder: the next call has a cancelled result to append.
   pure def drainable(t: State): bool =
@@ -123,13 +135,12 @@ module agent_coarse {
 
   pure def drainOne(t: State): State = if (drainable(t)) appendResult(t) else t
 
-  pure def drain(t: State): State = drainOne(drainOne(t))
-
+  pure def drain(t: State): State = drainOne(drainOne(drainOne(t)))
   // RunSession.stop: cancel the run, lifecycle RUNNING -> STOPPING, drain.
   pure def stopped(t: State): State = {
     val c = { ...t, cancelled: true, phase: "STOPPING", provisional: false,
               lc: if (t.lc == "RUNNING") "STOPPING" else t.lc }
-    drain(if (t.lc == "RUNNING") cancelPending(c) else c)
+    drain(cancelPending(c))
   }
 
   // RunSession.finish / finishLifecycle.
@@ -146,33 +157,56 @@ module agent_coarse {
 
   // The assistant turn of RunSession.acceptTurn is appended.
   pure def acceptedTurn(t: State): State = {
-    ...t, turn: "NONE", turnId0: 0, turnId1: 0, provisional: false, turns: t.turns + 1,
+    ...t, turn: "NONE", turnId0: 0, turnId1: 0, turnId2: 0, provisional: false, turns: t.turns + 1,
     history: t.history.append(assistantItem(t.runId, t.turns + 1)),
+  }
+  // LengthCalls is admitted and accounted without executing tool effects.
+  pure def lengthCompleted(a: State, k0: int, k1: int, k2: int): State = {
+    val b = begun(a, k0, k1, k2)
+    val first = withSlot({ ...b, history: b.history.append(k0), nextIndex: 1 },
+                         0, { ...b.slot0, status: "COMPLETED", results: 1 })
+    if (b.n == 1) finished(first)
+    else {
+      val second = withSlot({ ...first, history: first.history.append(k1), nextIndex: 2 },
+                            1, { ...first.slot1, status: "COMPLETED", results: 1 })
+      if (b.n == 2) finished(second)
+      else finished(withSlot({ ...second, history: second.history.append(k2), nextIndex: 3 },
+                             2, { ...second.slot2, status: "COMPLETED", results: 1 }))
+    }
   }
 
   // RunSession.beginBatch after the lifecycle accepted the call IDs.
-  pure def begun(a: State, k0: int, k1: int): State = {
+  pure def begun(a: State, k0: int, k1: int, k2: int): State = {
     ...a,
     phase: "EXECUTING_TOOLS",
-    n: if (k1 == 0) 1 else 2,
+    n: if (k2 != 0) 3 else if (k1 == 0) 1 else 2,
     slot0: { key: k0, status: "PENDING", starts: 0, results: 0 },
     slot1: if (k1 == 0) EMPTY_SLOT else { key: k1, status: "PENDING", starts: 0, results: 0 },
+    slot2: if (k2 == 0) EMPTY_SLOT else { key: k2, status: "PENDING", starts: 0, results: 0 },
     nextIndex: 0,
-    acceptedIds: if (k1 == 0) a.acceptedIds.union(Set(k0)) else a.acceptedIds.union(Set(k0, k1)),
+    acceptedIds: if (k2 != 0) a.acceptedIds.union(Set(k0, k1, k2))
+                 else if (k1 == 0) a.acceptedIds.union(Set(k0))
+                 else a.acceptedIds.union(Set(k0, k1)),
     cursor: -1,
     outcome: "NONE",
   }
 
   pure def key0(t: State): int = callKey(t.runId, t.turnId0)
   pure def key1(t: State): int = if (t.turnId1 == 0) 0 else callKey(t.runId, t.turnId1)
+  pure def key2(t: State): int = if (t.turnId2 == 0) 0 else callKey(t.runId, t.turnId2)
 
   // RunSession.acceptTurn in REQUESTING.
   pure def accepted(t: State): State = {
-    val a = acceptedTurn(t)
-    val reused = t.acceptedIds.contains(key0(t)) or (key1(t) != 0 and t.acceptedIds.contains(key1(t)))
-    if (t.turn == "TEXT") finished(a)
-    else if (reused) stopped(a)
-    else begun(a, key0(t), key1(t))
+    val reused = t.acceptedIds.contains(key0(t))
+      or (key1(t) != 0 and t.acceptedIds.contains(key1(t)))
+      or (key2(t) != 0 and t.acceptedIds.contains(key2(t)))
+    if (reused) stopped({ ...t, turn: "NONE", turnId0: 0, turnId1: 0, turnId2: 0 })
+    else {
+      val a = acceptedTurn(t)
+      if (t.turn == "TEXT") finished(a)
+      else if (t.turn == "LENGTH_CALLS") lengthCompleted(a, key0(t), key1(t), key2(t))
+      else begun(a, key0(t), key1(t), key2(t))
+    }
   }
 
   // Effect start for the cursor call.
@@ -201,7 +235,8 @@ module agent_coarse {
     s' = { ...s, phase: "REQUESTING", lc: "RUNNING", active: true, runId: s.runId + 1,
            cancelled: false, history: s.history.append(userItem(s.runId + 1)),
            provisional: false, req: "NONE", retried: false, turn: "NONE", turnId0: 0,
-           turnId1: 0, turns: 0, n: 0, slot0: EMPTY_SLOT, slot1: EMPTY_SLOT, nextIndex: 0,
+           turnId1: 0, turnId2: 0, turns: 0, n: 0, slot0: EMPTY_SLOT,
+           slot1: EMPTY_SLOT, slot2: EMPTY_SLOT, nextIndex: 0,
            acceptedIds: Set(), startedIds: Set(), cursor: -1, outcome: "NONE", inEffect: -1 },
     prev' = s,
   }
@@ -233,14 +268,19 @@ module agent_coarse {
 
   // Provider: one attempt of the in-flight request.
   action providerAttempt = {
-    nondet outcome = oneOf(Set("TERMINAL_TEXT", "TERMINAL_CALLS", "RETRYABLE", "FAILED"))
+    nondet outcome = oneOf(Set("TERMINAL_TEXT", "TERMINAL_CALLS", "TERMINAL_LENGTH_CALLS",
+                               "RETRYABLE", "FAILED"))
     nondet ids = oneOf(BATCHES)
     all {
       s.req == "IN_FLIGHT",
       s' = if (s.phase != "REQUESTING") { ...s, req: "NONE" }
            else if (outcome == "TERMINAL_TEXT") { ...s, req: "NONE", turn: "TEXT" }
+           else if (outcome == "TERMINAL_LENGTH_CALLS")
+             { ...s, req: "NONE", turn: "LENGTH_CALLS", turnId0: ids._1,
+               turnId1: ids._2, turnId2: ids._3 }
            else if (outcome == "TERMINAL_CALLS")
-             { ...s, req: "NONE", turn: "CALLS", turnId0: ids._1, turnId1: ids._2 }
+             { ...s, req: "NONE", turn: "CALLS", turnId0: ids._1,
+               turnId1: ids._2, turnId2: ids._3 }
            else if (outcome == "RETRYABLE" and not(s.retried)) { ...s, retried: true, provisional: false }
            else stopped({ ...s, req: "NONE" }),
       prev' = s,
@@ -260,7 +300,9 @@ module agent_coarse {
   // Driver: RunSession.acceptTurn. Outside REQUESTING it throws; the driver drops the turn.
   action acceptTurn = all {
     s.turn != "NONE",
-    s' = if (s.phase != "REQUESTING") { ...s, turn: "NONE", turnId0: 0, turnId1: 0 } else accepted(s),
+    s' = if (s.phase != "REQUESTING")
+           { ...s, turn: "NONE", turnId0: 0, turnId1: 0, turnId2: 0 }
+         else accepted(s),
     prev' = s,
   }
 
@@ -276,14 +318,14 @@ module agent_coarse {
 
   // Driver: CallAdmission.execute entry, atomic with the lifecycle phase check.
   action admit = {
-    nondet result = oneOf(Set("EXECUTED", "LIMITED"))
+    nondet result = oneOf(Set("EXECUTED", "LIMITED", "REJECTED"))
     all {
       s.cursor != -1,
       s.outcome == "NONE",
       s.inEffect == -1,
       s' = if (s.lc != "RUNNING" or slotAt(s, s.cursor).status != "PENDING") { ...s, cursor: -1 }
-           else if (result == "LIMITED")
-             withSlot({ ...s, outcome: "LIMITED" }, s.cursor,
+           else if (result == "LIMITED" or result == "REJECTED")
+             withSlot({ ...s, outcome: result }, s.cursor,
                       { ...slotAt(s, s.cursor), status: "COMPLETED" })
            else started(s),
       prev' = s,
@@ -319,18 +361,21 @@ module agent_coarse {
     prev' = s,
   }
 
-  // Content: RunSession.dispose. It does not drain; a later stop does.
+  // Content: RunSession.dispose. Closing an active run cancels and drains all
+  // calls that have not started, just as RunSession.stop does.
   action close = all {
     not(s.disposed),
-    s' = if (not(s.active)) { ...s, disposed: true, provisional: false, phase: "DISPOSED", lc: "CLOSED" }
+    s' = if (not(s.active)) { ...s, disposed: true, registryDisposed: true,
+                               provisional: false, phase: "DISPOSED", lc: "CLOSED" }
          else if (s.lc == "RUNNING" or s.lc == "STOPPING")
-           cancelPending({ ...s, disposed: true, provisional: false, cancelled: true,
-                           phase: "STOPPING", lc: "CLOSING" })
-         else { ...s, disposed: true, provisional: false, cancelled: true, phase: "STOPPING" },
+           { ...stopped(s), disposed: true, registryDisposed: true, lc: "CLOSING" }
+         else { ...s, disposed: true, registryDisposed: true, provisional: false,
+                cancelled: true, phase: "STOPPING" },
     prev' = s,
   }
 
-  // Driver: finishStopped -> RunSession.finish once the driver is idle and the batch settled.
+  // Driver: finishStopped -> RunSession.finish once the driver is idle, the
+  // batch is settled, and every accepted call occurrence has a result.
   action finish = all {
     s.active,
     s.phase == "STOPPING",
@@ -338,15 +383,18 @@ module agent_coarse {
     s.turn == "NONE",
     s.cursor == -1,
     batchSettled(s),
+    batchRecorded(s),
     s' = finished(s),
     prev' = s,
   }
 
-  // CacheGeneration.replacement from an idle session.
+  // CacheGeneration.replacement from an idle session. A replacement changes
+  // the complete stable request head and resets the append-only input prefix.
   action newGeneration = all {
     s.phase == "IDLE",
     s.generation < MAX_GENERATIONS,
-    s' = { ...s, generation: s.generation + 1, lastRequest: [], requestsInGen: 0 },
+    s' = { ...s, generation: s.generation + 1, requestHead: s.requestHead + 1,
+           lastRequest: [], requestsInGen: 0 },
     prev' = s,
   }
 
@@ -393,34 +441,41 @@ module agent_coarse {
   // I4: every call has at most one result, and before the next provider request
   // every call of the previous batch has exactly one result.
   val INV_C1 =
-    s.slot0.results <= 1 and s.slot1.results <= 1
+    s.slot0.results <= 1 and s.slot1.results <= 1 and s.slot2.results <= 1
+      and ((s.phase == "IDLE" or s.phase == "DISPOSED") implies batchRecorded(s))
       and (s.req == "IN_FLIGHT" implies
-             ((s.n <= 0 or s.slot0.results == 1) and (s.n <= 1 or s.slot1.results == 1)))
+             ((s.n <= 0 or s.slot0.results == 1)
+              and (s.n <= 1 or s.slot1.results == 1)
+              and (s.n <= 2 or s.slot2.results == 1)))
 
-  // I8: once Stop or Close wins the lifecycle, no effect starts in that run.
   val INV_C2 =
-    (prev.lc != "RUNNING" and s.runId == prev.runId)
+    (s.lc != "RUNNING" and s.runId == prev.runId)
       implies (s.startedIds == prev.startedIds
-               and s.slot0.starts == prev.slot0.starts and s.slot1.starts == prev.slot1.starts)
+               and (s.slot0.key != prev.slot0.key or s.slot0.starts == prev.slot0.starts)
+               and (s.slot1.key != prev.slot1.key or s.slot1.starts == prev.slot1.starts)
+               and (s.slot2.key != prev.slot2.key or s.slot2.starts == prev.slot2.starts))
 
   // I8, I9: an idle or disposed session has no active run and no unsettled call.
   val INV_C3 = (s.phase == "IDLE" or s.phase == "DISPOSED") implies (not(s.active) and batchSettled(s))
 
   // I3: no call effect starts twice, and a started call never becomes admissible again.
   val INV_C4 =
-    s.slot0.starts <= 1 and s.slot1.starts <= 1
+    s.slot0.starts <= 1 and s.slot1.starts <= 1 and s.slot2.starts <= 1
       and (s.n <= 0 or s.slot0.status != "PENDING" or not(s.startedIds.contains(s.slot0.key)))
       and (s.n <= 1 or s.slot1.status != "PENDING" or not(s.startedIds.contains(s.slot1.key)))
+      and (s.n <= 2 or s.slot2.status != "PENDING" or not(s.startedIds.contains(s.slot2.key)))
 
-  // I13: within one generation, request N is a prefix of request N+1.
+  // I13: within one generation, the stable serialized request head and the
+  // serialized input sequence are append-only.
   val INV_C5 =
     (s.generation == prev.generation and s.requestsInGen == prev.requestsInGen + 1)
-      implies isPrefix(prev.lastRequest, s.lastRequest)
+      implies (s.requestHead == prev.requestHead
+               and isPrefix(prev.lastRequest, s.lastRequest))
 
-  // I11: disposed content receives no provisional delivery, and a DISPOSED
-  // session's history does not change.
+  // I11: disposed content receives no provisional delivery, a DISPOSED
+  // session's history does not change, and its read registry is disposed.
   val INV_C6 =
-    (s.disposed implies not(s.provisional))
+    (s.disposed implies (not(s.provisional) and s.registryDisposed))
       and (prev.phase == "DISPOSED" implies s.history == prev.history)
 
   // ---- Consistency lemmas (checked like invariants; they tie cursor and effect
@@ -430,6 +485,7 @@ module agent_coarse {
     (s.inEffect == -1 or (s.inEffect < s.n and slotAt(s, s.inEffect).status == "EXECUTING"))
       and (s.n <= 0 or s.slot0.status != "EXECUTING" or s.inEffect == 0)
       and (s.n <= 1 or s.slot1.status != "EXECUTING" or s.inEffect == 1)
+      and (s.n <= 2 or s.slot2.status != "EXECUTING" or s.inEffect == 2)
 
   val LEM_CURSOR = s.outcome == "NONE" or (s.cursor == s.nextIndex and s.cursor < s.n)
 
@@ -437,10 +493,10 @@ module agent_coarse {
     ((s.phase == "IDLE") iff (s.lc == "IDLE" and not(s.active) and not(s.disposed)))
       and ((s.phase == "DISPOSED") iff (s.lc == "CLOSED"))
       and (s.active iff (s.lc == "RUNNING" or s.lc == "STOPPING" or s.lc == "CLOSING"))
-
+      and (s.disposed implies (s.phase == "DISPOSED" or (s.phase == "STOPPING" and s.lc == "CLOSING")))
   val LEM_BOUNDS =
     s.turns <= MAX_TURNS and s.runId <= MAX_RUNS and s.generation <= MAX_GENERATIONS
-      and s.n <= 2 and s.nextIndex <= s.n
+      and s.n <= 3 and s.nextIndex <= s.n
 
   // ---- Witnesses ----
 
@@ -449,6 +505,7 @@ module agent_coarse {
     s.phase == "IDLE" and s.turns == MAX_TURNS and s.n > 0
       and s.slot0.status == "COMPLETED" and s.slot0.results == 1
       and (s.n <= 1 or (s.slot1.status == "COMPLETED" and s.slot1.results == 1))
+      and (s.n <= 2 or (s.slot2.status == "COMPLETED" and s.slot2.results == 1))
 
   // Stop during a running effect, then the effect fails after start.
   val W_STOP_WAIT =
@@ -496,11 +553,10 @@ module agent_coarse {
     prev' = s,
   }
 
-  // INV_C4: acceptTurn begins a batch without the accepted-call-ID check.
   action mut_acceptReusedIds = all {
     s.phase == "REQUESTING",
     s.turn == "CALLS",
-    s' = begun(acceptedTurn(s), key0(s), key1(s)),
+    s' = begun(acceptedTurn(s), key0(s), key1(s), key2(s)),
     prev' = s,
   }
 
