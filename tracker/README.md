@@ -1,7 +1,7 @@
 # Tracker — dev-only semantic-reads ledger
 
 Local workflow state for the native-agent semantic-reads preparation plan
-(`shiny-questing-crane`). **Not product state.** `tracker/ledger.sqlite*` is
+(`native-agent-docs/plans/semantic-reads-preparation.md`). **Not product state.** `tracker/ledger.sqlite*` is
 gitignored; the tracked clause export in `tracker/clauses/clauses.sql` is the
 only artifact other work consumes.
 
@@ -26,8 +26,12 @@ Python 3 standard library only. Every connection sets `PRAGMA foreign_keys=ON`.
 | `claim acquire/release` | implemented | lease token required for release; double acquire aborts |
 | `evidence record` | implemented | hashes the artifact; result/kind validated |
 | `selftest` | implemented | runs every fixture; FAIL fails the run, PENDING is reported |
-| `scan-sources`, `scan-models` | pending | Phase 2b / Phase 4 |
-| `clause`, `span exclude`, `obligation`, `binding`, `review`, `finding` | pending | with their consuming phases |
+| `scan-models [FILE ...] --actor A` | implemented | `quint parse` per module (default `native-agent-docs/models/*.qnt`); records every `action`, `var` and `val` with parameters and `file:line` locator; one event per changed module digest, unchanged digests are skipped |
+| `obligation add ID --clause C --module M --name N --kind K` / `retire ID --reason R` | implemented | needs a current clause and a declaration in the current model scan; used from Phase 4 |
+| `review open SUBJECT --basis DIGEST` / `close ROUND --outcome passed\|failed` | implemented | one open round per subject; `passed` needs every Blocker/Major in the round `verified`, none stale, and evidence with subject `review:ROUND` |
+| `finding add --round R --severity S --target-kind K --target-id T --summary TEXT [--category C] [ID]` | implemented | stores the target's current revision; ID defaults to `R<round>-<nnn>` |
+| `finding address\|reject\|defer\|reopen ID --reason R`, `finding verify ID` | implemented | transitions are checked; `verify` must come from an actor other than the disposer |
+| `scan-sources`, `clause`, `span exclude`, `binding` | pending | Phase 4 and Phase 5 |
 | `export-roundtrip` | covered by `tests/test_tracker.py` | full-history export/rebuild comparison |
 
 ## Tables (14)
@@ -54,10 +58,10 @@ gap-free by trigger): `clause`, `model_obligation`, `binding`, `finding`.
 | `duplicate_clauses` | — | id_a, id_b, text_sha256 | no two current clauses share text |
 | `conflicting_outcomes` | — | id_a, id_b, trigger, outcome_a, outcome_b | no trigger has two current outcomes |
 | `interaction_without_obligation` | — | id | every interaction clause has an invariant/refinement obligation |
-| `unbound_model_actions` | — | module, name | every current non-mutant action has a current binding (verdict evidence is command-layer) |
-| `stale_findings` | — | id, target_kind, target_id, target_rev, status | no finding targets a superseded revision |
+| `unbound_model_actions` | — | module, name | every current action except `mut_*` and `step_mut_*` has a current binding (verdict evidence is command-layer) |
+| `stale_findings` | — | id, target_kind, target_id, target_rev, status | no finding targets a superseded revision or an older model scan |
 | `stale_clauses` | — | clause_id, clause_rev, file, pointer | every current clause cites the current source observation |
-| `open_findings` | — | id, severity, category, target_kind, target_id, target_rev | nothing open (severity-ordered listing) |
+| `open_findings` | — | id, severity, category, target_kind, target_id, target_rev, status, summary | nothing open or reopened (severity-ordered listing) |
 | `evidence_for` | `subject=k` | id, kind, result, tool_version, params, artifact_sha256, basis_digest | listing |
 
 ## Fixtures (`tracker/tests/fixtures/`)
@@ -66,7 +70,14 @@ Each fixture declares its expectation in a leading comment; `selftest` enforces 
 `new_without_absence.sql` is PENDING until the `binding set` command layer lands
 (verdict-specific evidence rule).
 
+## Finding targets
+
+| `target_kind` | `target_id` | `target_rev` |
+|---|---|---|
+| `clause`, `obligation`, `binding` | row id | current `rev` |
+| `model` | module name | id of the latest `scan-models` event for the module |
+| `artifact` | repository path | `0`; the round `basis_digest` pins the content |
+
 ## Migrations
 
-`schema.sql` is the canonical DDL. `migrations/001_init.sql` mirrors it at ledger
-creation; later changes are new numbered files and never edit an old migration.
+`schema.sql` is the canonical latest DDL; a new ledger is created from it. `PRAGMA user_version` holds the number of the last applied migration, and `init` applies every later file in `migrations/` to an existing ledger. Never edit an applied migration; add a new numbered file and update `schema.sql` to match. `002_review_targets.sql` adds the `model` and `artifact` finding targets, `finding.summary`, `review_round_close.outcome` and `model_action.locator`, and makes `current_model_action` select the latest scan of each module.

@@ -8,4 +8,7 @@ WHERE f.status IN ('open', 'addressed', 'rejected', 'deferred', 'reopened')
    OR (f.target_kind = 'obligation' AND EXISTS (
           SELECT 1 FROM current_model_obligation t WHERE t.id = f.target_id AND t.rev > f.target_rev))
    OR (f.target_kind = 'binding' AND EXISTS (
-          SELECT 1 FROM current_binding t WHERE t.id = f.target_id AND t.rev > f.target_rev)));
+          SELECT 1 FROM current_binding t WHERE t.id = f.target_id AND t.rev > f.target_rev))
+   OR (f.target_kind = 'model' AND EXISTS (
+          SELECT 1 FROM event t WHERE t.command = 'scan-models' AND t.subject = f.target_id
+                                  AND t.id > f.target_rev)));

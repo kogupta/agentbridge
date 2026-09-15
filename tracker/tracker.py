@@ -8,13 +8,17 @@ Every connection enables PRAGMA foreign_keys=ON; no code path runs without it.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import datetime as dt
 import hashlib
+import json
 import re
 import secrets
 import sqlite3
 import subprocess
 import sys
+import tempfile
+from collections.abc import Iterator
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -37,10 +41,29 @@ def connect(path: Path | str, readonly: bool = False) -> sqlite3.Connection:
     return conn
 
 
+def migration_number(path: Path) -> int:
+    return int(path.name.split("_", 1)[0])
+
+
 def apply_schema(conn: sqlite3.Connection) -> None:
-    conn.executescript(SCHEMA.read_text(encoding="utf-8"))
-    for migration in sorted(MIGRATIONS.glob("*.sql")):
-        conn.executescript(migration.read_text(encoding="utf-8"))
+    """Create a new ledger from schema.sql, or upgrade an existing one.
+
+    schema.sql is the canonical latest DDL. `PRAGMA user_version` holds the number of
+    the last applied migration; an existing ledger gets every later migration in order.
+    """
+    migrations = sorted(MIGRATIONS.glob("*.sql"), key=migration_number)
+    latest = migration_number(migrations[-1]) if migrations else 0
+    empty = conn.execute(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table'").fetchone()[0] == 0
+    if empty:
+        conn.executescript(SCHEMA.read_text(encoding="utf-8"))
+    else:
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+        for migration in migrations:
+            if migration_number(migration) > version:
+                conn.executescript(migration.read_text(encoding="utf-8"))
+                conn.execute(f"PRAGMA user_version = {migration_number(migration)}")
+    conn.execute(f"PRAGMA user_version = {latest}")
 
 
 def parse_actor(spec: str) -> tuple[str, str]:
@@ -287,6 +310,277 @@ def cmd_evidence(args: argparse.Namespace) -> None:
     print(f"recorded {args.kind} evidence for {args.subject} ({args.result})")
 
 
+@contextlib.contextmanager
+def write_tx(db: str) -> Iterator[sqlite3.Connection]:
+    """One BEGIN IMMEDIATE transaction; rolls back on any error, including SystemExit."""
+    conn = connect(db)
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        yield conn
+        conn.execute("COMMIT")
+    except BaseException:
+        try:
+            conn.execute("ROLLBACK")
+        except sqlite3.Error:
+            pass
+        raise
+    finally:
+        conn.close()
+
+
+# ------------------------------------------------------------------ scan-models
+
+MODELS_DIR = ROOT.parent / "native-agent-docs" / "models"
+DECLARATION_KINDS = {"action": "action", "val": "val", "pureval": "val"}
+
+
+def quint_declarations(path: Path, quint: str) -> list[dict[str, object]]:
+    """Return the action, var and val declarations of the module named like the file."""
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / "parse.json"
+        proc = subprocess.run([quint, "parse", str(path), "--out", str(out)],
+                              capture_output=True, text=True)
+        if proc.returncode != 0 or not out.is_file():
+            raise SystemExit(f"Error: quint parse failed for {path}:\n{proc.stdout}{proc.stderr}")
+        parsed = json.loads(out.read_text(encoding="utf-8"))
+    modules = [m for m in parsed.get("modules", []) if m.get("name") == path.stem]
+    if len(modules) != 1:
+        raise SystemExit(f"Error: {path} must declare exactly one module named {path.stem}")
+    source_lines = path.read_text(encoding="utf-8").splitlines()
+    declarations: list[dict[str, object]] = []
+    for decl in modules[0]["declarations"]:
+        if decl["kind"] == "var":
+            kind, params = "var", []
+        elif decl["kind"] == "def" and decl.get("qualifier") in DECLARATION_KINDS:
+            kind = DECLARATION_KINDS[decl["qualifier"]]
+            expr = decl.get("expr", {})
+            params = [p["name"] for p in expr.get("params", [])] if expr.get("kind") == "lambda" else []
+        else:
+            continue
+        pattern = re.compile(rf"^\s*(?:pure\s+)?(?:action|val|var)\s+{re.escape(decl['name'])}\b")
+        line = next((i for i, text in enumerate(source_lines, 1) if pattern.match(text)), None)
+        declarations.append({"name": decl["name"], "kind": kind, "parameters": json.dumps(params),
+                             "line": line})
+    return declarations
+
+
+def cmd_scan_models(args: argparse.Namespace) -> None:
+    files = [Path(f) for f in args.files] if args.files else sorted(MODELS_DIR.glob("*.qnt"))
+    if not files:
+        raise SystemExit(f"Error: no .qnt files found under {MODELS_DIR}")
+    parsed = []
+    for path in files:  # parse everything before the transaction opens
+        if not path.is_file():
+            raise SystemExit(f"Error: model file {path} does not exist")
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        parsed.append((path, digest, quint_declarations(path, args.quint)))
+    actor_id, kind = parse_actor(args.actor)
+    with write_tx(args.db) as conn:
+        for path, digest, declarations in parsed:
+            module = path.stem
+            # Keyed on the scan event, not model_action: a module with no action, var or
+            # val declarations (for example agent_interface) writes an event and no rows.
+            latest = conn.execute(
+                "SELECT basis_digest FROM event WHERE command = 'scan-models' AND subject = ?"
+                " ORDER BY id DESC LIMIT 1", (module,)).fetchone()
+            if latest is not None and latest["basis_digest"] == digest:
+                print(f"unchanged {module} ({digest[:12]})")
+                continue
+            event_id = record_event(conn, actor_id, kind, "scan-models", module, digest)
+            rel = path.resolve().relative_to(ROOT.parent) if path.resolve().is_relative_to(ROOT.parent) else path
+            for decl in declarations:
+                conn.execute(
+                    "INSERT INTO model_action(module, name, event_id, kind, parameters, owner,"
+                    " source_sha256, locator) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (module, decl["name"], event_id, decl["kind"], decl["parameters"], module, digest,
+                     f"{rel}:{decl['line']}" if decl["line"] else None))
+            print(f"scanned {module} ({digest[:12]}): {len(declarations)} declarations, event {event_id}")
+
+
+# ------------------------------------------------------------------ obligations
+
+OBLIGATION_KINDS = ("invariant", "witness", "mutant", "refinement")
+
+
+def latest_revision(conn: sqlite3.Connection, table: str, row_id: str) -> sqlite3.Row | None:
+    return conn.execute(f"SELECT * FROM {table} WHERE id = ? ORDER BY rev DESC LIMIT 1",
+                        (row_id,)).fetchone()
+
+
+def cmd_obligation(args: argparse.Namespace) -> None:
+    actor_id, kind = parse_actor(args.actor)
+    with write_tx(args.db) as conn:
+        existing = latest_revision(conn, "model_obligation", args.id)
+        if args.obligation_action == "add":
+            if existing is not None:
+                raise SystemExit(f"Error: obligation {args.id} already exists")
+            if args.kind not in OBLIGATION_KINDS:
+                raise SystemExit(f"Error: obligation kind must be one of {', '.join(OBLIGATION_KINDS)}")
+            clause = conn.execute("SELECT id, rev FROM current_clause WHERE id = ?",
+                                  (args.clause,)).fetchone()
+            if clause is None:
+                raise SystemExit(f"Error: no current clause {args.clause}")
+            model = conn.execute(
+                "SELECT event_id FROM current_model_action WHERE module = ? AND name = ?",
+                (args.module, args.name)).fetchone()
+            if model is None:
+                raise SystemExit(f"Error: {args.module}::{args.name} is not in the current model scan")
+            event_id = record_event(conn, actor_id, kind, "obligation add", args.id, git_head())
+            conn.execute(
+                "INSERT INTO model_obligation(id, rev, clause_id, clause_rev, module, name, model_event_id,"
+                " kind, status, event_id) VALUES (?, 1, ?, ?, ?, ?, ?, ?, 'active', ?)",
+                (args.id, clause["id"], clause["rev"], args.module, args.name, model["event_id"],
+                 args.kind, event_id))
+            print(f"added obligation {args.id}")
+        else:
+            if existing is None or existing["status"] == "retired":
+                raise SystemExit(f"Error: no active obligation {args.id}")
+            if not args.reason:
+                raise SystemExit("Error: obligation retire requires --reason")
+            event_id = record_event(conn, actor_id, kind, "obligation retire", args.id, git_head())
+            conn.execute(
+                "INSERT INTO model_obligation(id, rev, clause_id, clause_rev, module, name, model_event_id,"
+                " kind, status, reason, event_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'retired', ?, ?)",
+                (args.id, existing["rev"] + 1, existing["clause_id"], existing["clause_rev"],
+                 existing["module"], existing["name"], existing["model_event_id"], existing["kind"],
+                 args.reason, event_id))
+            print(f"retired obligation {args.id}")
+
+
+# ------------------------------------------------------------------ reviews and findings
+
+BLOCKING_SEVERITIES = ("Blocker", "Major")
+
+
+def open_round(conn: sqlite3.Connection, round_id: int) -> sqlite3.Row:
+    row = conn.execute("SELECT * FROM open_rounds WHERE id = ?", (round_id,)).fetchone()
+    if row is None:
+        raise SystemExit(f"Error: review round {round_id} is not open")
+    return row
+
+
+def cmd_review(args: argparse.Namespace) -> None:
+    actor_id, kind = parse_actor(args.actor)
+    with write_tx(args.db) as conn:
+        if args.review_action == "open":
+            if not args.basis:
+                raise SystemExit("Error: review open requires --basis DIGEST")
+            event_id = record_event(conn, actor_id, kind, "review open", args.target, args.basis)
+            cur = conn.execute(
+                "INSERT INTO review_round(subject, basis_digest, reviewer, event_id) VALUES (?, ?, ?, ?)",
+                (args.target, args.basis, actor_id, event_id))
+            print(f"opened review round {cur.lastrowid} on {args.target}")
+            return
+        round_id = int(args.target)
+        review = open_round(conn, round_id)
+        if args.outcome == "passed":
+            unverified = conn.execute(
+                "SELECT id, severity, status FROM current_finding WHERE round_id = ?"
+                " AND severity IN ('Blocker', 'Major') AND status <> 'verified' ORDER BY id",
+                (round_id,)).fetchall()
+            if unverified:
+                listing = ", ".join(f"{r['id']} {r['severity']} {r['status']}" for r in unverified)
+                raise SystemExit(f"Error: cannot pass round {round_id}; unverified Blocker/Major: {listing}")
+            stale_query = (QUERIES / "stale_findings.sql").read_text(encoding="utf-8")
+            stale = [r for r in conn.execute(stale_query).fetchall()
+                     if conn.execute("SELECT 1 FROM current_finding WHERE id = ? AND round_id = ?"
+                                     " AND severity IN ('Blocker', 'Major')", (r["id"], round_id)).fetchone()]
+            if stale:
+                raise SystemExit(f"Error: cannot pass round {round_id}; stale Blocker/Major: "
+                                 + ", ".join(r["id"] for r in stale))
+            evidence = conn.execute("SELECT 1 FROM evidence WHERE subject = ?",
+                                    (f"review:{round_id}",)).fetchone()
+            if evidence is None:
+                raise SystemExit(f"Error: cannot pass round {round_id}; record the review check log first:"
+                                 f" evidence record --subject review:{round_id} ...")
+        event_id = record_event(conn, actor_id, kind, "review close", review["subject"], review["basis_digest"])
+        conn.execute("INSERT INTO review_round_close(round_id, event_id, outcome) VALUES (?, ?, ?)",
+                     (round_id, event_id, args.outcome))
+        print(f"closed review round {round_id} ({args.outcome})")
+
+
+def finding_target_rev(conn: sqlite3.Connection, target_kind: str, target_id: str) -> int:
+    if target_kind in ("clause", "obligation", "binding"):
+        view = {"clause": "current_clause", "obligation": "current_model_obligation",
+                "binding": "current_binding"}[target_kind]
+        row = conn.execute(f"SELECT rev FROM {view} WHERE id = ?", (target_id,)).fetchone()
+        if row is None:
+            raise SystemExit(f"Error: no current {target_kind} {target_id}")
+        return int(row["rev"])
+    if target_kind == "model":
+        row = conn.execute("SELECT MAX(id) AS rev FROM event WHERE command = 'scan-models' AND subject = ?",
+                           (target_id,)).fetchone()
+        if row is None or row["rev"] is None:
+            raise SystemExit(f"Error: module {target_id} has no model scan; run scan-models first")
+        return int(row["rev"])
+    if target_kind == "artifact":
+        if not (ROOT.parent / target_id).exists():
+            raise SystemExit(f"Error: artifact {target_id} does not exist in the repository")
+        return 0
+    raise SystemExit("Error: target kind must be clause, obligation, binding, model or artifact")
+
+
+# Allowed finding transitions: new status -> statuses it may follow.
+FINDING_TRANSITIONS = {
+    "addressed": ("open", "reopened"),
+    "rejected": ("open", "reopened"),
+    "deferred": ("open", "reopened"),
+    "verified": ("addressed", "rejected", "deferred"),
+    "reopened": ("addressed", "rejected", "deferred", "verified"),
+}
+FINDING_VERBS = {"address": "addressed", "reject": "rejected", "defer": "deferred",
+                 "verify": "verified", "reopen": "reopened"}
+
+
+def cmd_finding(args: argparse.Namespace) -> None:
+    actor_id, kind = parse_actor(args.actor)
+    with write_tx(args.db) as conn:
+        if args.finding_action == "add":
+            if args.severity not in ("Blocker", "Major", "Minor", "Nit"):
+                raise SystemExit("Error: severity must be Blocker, Major, Minor or Nit")
+            if not args.summary:
+                raise SystemExit("Error: finding add requires --summary")
+            if args.round is None:
+                raise SystemExit("Error: finding add requires --round")
+            open_round(conn, args.round)
+            target_rev = finding_target_rev(conn, args.target_kind, args.target_id)
+            finding_id = args.id
+            if finding_id is None:
+                count = conn.execute("SELECT COUNT(DISTINCT id) FROM finding WHERE round_id = ?",
+                                     (args.round,)).fetchone()[0]
+                finding_id = f"R{args.round}-{count + 1:03d}"
+            if latest_revision(conn, "finding", finding_id) is not None:
+                raise SystemExit(f"Error: finding {finding_id} already exists")
+            event_id = record_event(conn, actor_id, kind, "finding add", finding_id, git_head())
+            conn.execute(
+                "INSERT INTO finding(id, rev, round_id, severity, category, target_kind, target_id,"
+                " target_rev, status, actor, event_id, summary)"
+                " VALUES (?, 1, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?)",
+                (finding_id, args.round, args.severity, args.category, args.target_kind, args.target_id,
+                 target_rev, actor_id, event_id, args.summary))
+            print(f"added finding {finding_id} ({args.severity}, {args.target_kind} {args.target_id}"
+                  f" rev {target_rev})")
+            return
+        status = FINDING_VERBS[args.finding_action]
+        current = latest_revision(conn, "finding", args.id)
+        if current is None:
+            raise SystemExit(f"Error: no finding {args.id}")
+        if current["status"] not in FINDING_TRANSITIONS[status]:
+            raise SystemExit(f"Error: finding {args.id} is {current['status']}; cannot mark it {status}")
+        if status != "verified" and not args.reason:
+            raise SystemExit(f"Error: finding {args.finding_action} requires --reason")
+        event_id = record_event(conn, actor_id, kind, f"finding {args.finding_action}", args.id, git_head())
+        conn.execute(
+            "INSERT INTO finding(id, rev, round_id, severity, category, target_kind, target_id, target_rev,"
+            " verifies_rev, status, reason, actor, event_id, summary)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (args.id, current["rev"] + 1, current["round_id"], current["severity"], current["category"],
+             current["target_kind"], current["target_id"], current["target_rev"],
+             current["rev"] if status == "verified" else None, status, args.reason, actor_id, event_id,
+             current["summary"]))
+        print(f"finding {args.id} is {status}")
+
+
 # --------------------------------------------------------------------------- selftest
 
 def split_statements(sql_text: str) -> list[str]:
@@ -407,6 +701,44 @@ def build_parser() -> argparse.ArgumentParser:
     p_evidence.add_argument("--tool-version", default="unrecorded")
     p_evidence.add_argument("--actor", default="tracker:agent")
     p_evidence.set_defaults(func=cmd_evidence)
+
+    p_scan = sub.add_parser("scan-models", help="record model declarations from quint parse")
+    p_scan.add_argument("files", nargs="*", help=".qnt files (default: native-agent-docs/models/*.qnt)")
+    p_scan.add_argument("--quint", default="quint")
+    p_scan.add_argument("--actor", required=True)
+    p_scan.set_defaults(func=cmd_scan_models)
+
+    p_obligation = sub.add_parser("obligation")
+    p_obligation.add_argument("obligation_action", choices=["add", "retire"])
+    p_obligation.add_argument("id")
+    p_obligation.add_argument("--clause")
+    p_obligation.add_argument("--module")
+    p_obligation.add_argument("--name")
+    p_obligation.add_argument("--kind")
+    p_obligation.add_argument("--reason")
+    p_obligation.add_argument("--actor", required=True)
+    p_obligation.set_defaults(func=cmd_obligation)
+
+    p_review = sub.add_parser("review", help="open SUBJECT --basis DIGEST | close ROUND --outcome")
+    p_review.add_argument("review_action", choices=["open", "close"])
+    p_review.add_argument("target", help="subject for open, round id for close")
+    p_review.add_argument("--basis")
+    p_review.add_argument("--outcome", choices=["passed", "failed"], default="failed")
+    p_review.add_argument("--actor", required=True)
+    p_review.set_defaults(func=cmd_review)
+
+    p_finding = sub.add_parser("finding")
+    p_finding.add_argument("finding_action", choices=["add", *FINDING_VERBS])
+    p_finding.add_argument("id", nargs="?", help="finding id (optional for add)")
+    p_finding.add_argument("--round", type=int)
+    p_finding.add_argument("--severity")
+    p_finding.add_argument("--category", default="general")
+    p_finding.add_argument("--target-kind", choices=["clause", "obligation", "binding", "model", "artifact"])
+    p_finding.add_argument("--target-id")
+    p_finding.add_argument("--summary")
+    p_finding.add_argument("--reason")
+    p_finding.add_argument("--actor", required=True)
+    p_finding.set_defaults(func=cmd_finding)
 
     sub.add_parser("selftest").set_defaults(func=cmd_selftest)
     return parser

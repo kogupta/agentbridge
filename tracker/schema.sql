@@ -1,4 +1,4 @@
--- tracker/schema.sql — dev-only semantic-reads ledger (plan shiny-questing-crane, Phase 3).
+-- tracker/schema.sql — dev-only semantic-reads ledger (plan native-agent-docs/plans/semantic-reads-preparation.md, Phase 3).
 -- Not product state. See tracker/README.md. Every connection must set PRAGMA foreign_keys=ON.
 PRAGMA foreign_keys = ON;
 
@@ -116,6 +116,7 @@ CREATE TABLE IF NOT EXISTS model_action (
     parameters    TEXT NOT NULL,
     owner         TEXT NOT NULL,
     source_sha256 TEXT NOT NULL,
+    locator       TEXT,
     PRIMARY KEY (module, name, event_id)
 );
 CREATE TRIGGER IF NOT EXISTS model_action_no_update BEFORE UPDATE ON model_action
@@ -223,7 +224,8 @@ BEGIN SELECT RAISE(ABORT, 'subject already has an open review round'); END;
 
 CREATE TABLE IF NOT EXISTS review_round_close (
     round_id  INTEGER PRIMARY KEY REFERENCES review_round(id),
-    event_id  INTEGER NOT NULL REFERENCES event(id)
+    event_id  INTEGER NOT NULL REFERENCES event(id),
+    outcome   TEXT NOT NULL DEFAULT 'failed' CHECK (outcome IN ('passed', 'failed'))
 );
 CREATE TRIGGER IF NOT EXISTS review_round_close_no_update BEFORE UPDATE ON review_round_close
 BEGIN SELECT RAISE(ABORT, 'review_round_close is append-only'); END;
@@ -236,7 +238,7 @@ CREATE TABLE IF NOT EXISTS finding (
     round_id     INTEGER NOT NULL REFERENCES review_round(id),
     severity     TEXT NOT NULL CHECK (severity IN ('Blocker', 'Major', 'Minor', 'Nit')),
     category     TEXT NOT NULL,
-    target_kind  TEXT NOT NULL CHECK (target_kind IN ('clause', 'obligation', 'binding')),
+    target_kind  TEXT NOT NULL CHECK (target_kind IN ('clause', 'obligation', 'binding', 'model', 'artifact')),
     target_id    TEXT NOT NULL,
     target_rev   INTEGER NOT NULL,
     verifies_rev INTEGER,
@@ -244,6 +246,7 @@ CREATE TABLE IF NOT EXISTS finding (
     reason       TEXT,
     actor        TEXT NOT NULL REFERENCES actor(id),
     event_id     INTEGER NOT NULL REFERENCES event(id),
+    summary      TEXT NOT NULL DEFAULT '',
     CHECK (status NOT IN ('addressed', 'rejected', 'deferred') OR (reason IS NOT NULL AND length(reason) > 0)),
     PRIMARY KEY (id, rev)
 );
@@ -313,10 +316,10 @@ SELECT f.* FROM finding f
 WHERE f.rev = (SELECT MAX(rev) FROM finding f2 WHERE f2.id = f.id)
   AND f.status <> 'retired';
 
+-- The latest scan of each module; a declaration removed from a module is not current.
 CREATE VIEW IF NOT EXISTS current_model_action AS
 SELECT m.* FROM model_action m
-WHERE m.event_id = (SELECT MAX(event_id) FROM model_action m2
-                    WHERE m2.module = m.module AND m2.name = m.name);
+WHERE m.event_id = (SELECT MAX(event_id) FROM model_action m2 WHERE m2.module = m.module);
 
 CREATE VIEW IF NOT EXISTS current_source_field AS
 SELECT s.* FROM source_field s
