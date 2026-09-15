@@ -39,4 +39,7 @@ module read_refinement {
     prevView' = view,
     view' = projectView,
   }
+
+  // Mutant step: check with --step=step_mut_REF_R --invariant=REF_R.
+  action step_mut_REF_R = any { step, mut_unsettleAndProject }
 }

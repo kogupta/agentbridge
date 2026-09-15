@@ -9,6 +9,8 @@ module read_execution {
 
   pure val INDEX_BOUND: int = 2  // abstract smart-wait ticks
   pure val MAX_RESTARTS: int = 2 // write-action restarts per read
+  pure val MAX_EDITS: int = 2    // document edits per read (docVersion bound)
+  pure val MAX_DUMB: int = 2     // dumb-mode entries per read (psiCount bound)
 
   var registry: str             // LIVE | DISPOSED
   var docCommitted: bool
@@ -120,6 +122,7 @@ module read_execution {
   action dumbEnter = all {
     computation == "RUNNING",
     not(cancelled),
+    psiCount < MAX_DUMB,
     dumbMode' = true,
     psiCount' = psiCount + 1,
     docCommitted' = false,
@@ -161,6 +164,7 @@ module read_execution {
   }
 
   action editDocument = all {
+    docVersion < MAX_EDITS,
     docCommitted' = false,
     docVersion' = docVersion + 1,
     registry' = registry,
@@ -528,4 +532,12 @@ module read_execution {
     computeWasCommitted' = computeWasCommitted,
     indexNotReady' = indexNotReady,
   }
+
+  // Mutant steps: check with --step=step_mut_<INV> --invariant=<INV>; a counterexample
+  // is required. See agent_coarse for why they are not separate importing modules.
+  action step_mut_INV_R1 = any { step, mut_registerIgnoringCancel }
+  action step_mut_INV_R2 = any { step, mut_settleEarly }
+  action step_mut_INV_R3 = any { step, mut_accessAfterRefusal }
+  action step_mut_INV_R4 = any { step, mut_returnPastBound }
+  action step_mut_INV_R5 = any { step, mut_computeUncommitted }
 }

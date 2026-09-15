@@ -519,4 +519,14 @@ module agent_coarse {
     s' = { ...s, provisional: true },
     prev' = s,
   }
+
+  // Mutant steps: check with --step=step_mut_<INV> --invariant=<INV>; a counterexample
+  // is required. They live here, not in importing modules, because Quint 0.32.0
+  // fails to flatten `import ... as B` names for TLC and Apalache (QNT404).
+  action step_mut_INV_C1 = any { step, mut_completeEarly }
+  action step_mut_INV_C2 = any { step, mut_admitAfterStop }
+  action step_mut_INV_C3 = any { step, mut_finishDuringEffect }
+  action step_mut_INV_C4 = any { step, mut_acceptReusedIds }
+  action step_mut_INV_C5 = any { step, mut_compactHistory }
+  action step_mut_INV_C6 = any { step, mut_provisionalAfterDispose }
 }
