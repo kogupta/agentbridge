@@ -110,6 +110,9 @@ For an independent Pi or IntelliJ question, a main agent may delegate one focuse
 - A feature enters implementation only after its exact specification and design evidence pass. Frozen surfaces change only by reopening the affected spec or design gate.
 - Every normative behavior needs an acceptance criterion and enforcement location. Distinguish mechanical evidence from semantic review; a passing parser, model, or build proves only its stated scope.
 - For lifecycle work, preserve the single admission boundary, sequential effect accounting, terminal outcomes, cancellation semantics, ownership identity, and immutable observations documented in the lifecycle feature packet.
+- Read `native-agent-docs/models/README.md` before you change, check or review a Quint model. Check models with `native-agent-docs/models/check.sh`.
+- Read `tracker/README.md` before you use the tracker. Record reviews, findings and evidence with tracker commands, not in Markdown or JSON files.
+- The current preparation plan is `native-agent-docs/plans/semantic-reads-preparation.md`. Follow its phase order and gates.
 
 ## MCP tool changes
 
