@@ -1,0 +1,454 @@
+{
+  "format_version": 1,
+  "feature": "CAP-READ-DOMAIN",
+  "scope": "Platform-free Java domain for the seven IntelliJ-native read operations: typed argument values with bound validation, result bounds and the result collection cap, the session-local registry for symbol handles, read handles and page tokens, read handle values, immutable outcome values and ordering comparators. No IntelliJ access. Depends on CAP-LIFECYCLE-ADMISSION and CAP-DOMAIN-RUN-DRIVER. Wire JSON argument parsing, tool schemas, the LLM status/code/content envelope and rendering of read outcomes into ToolOutcome content are excluded and belong to the codec feature.",
+  "decisions": {
+    "core_language": "REF:product.md#CORE_LANGUAGE",
+    "qualification_target": "REF:product.md#QUALIFICATION_TARGET",
+    "session_owner": "REF:product.md#SESSION_OWNER",
+    "outcomes": "REF:product.md#OUTCOMES",
+    "reflection": "REF:product.md#REFLECTION",
+    "async": "REF:product.md#ASYNC",
+    "observability": "REF:product.md#OBSERVABILITY",
+    "prompt_cache": "REF:product.md#PROMPT_CACHE",
+    "donor_subtraction": "REF:product.md#DONOR_SUBTRACTION",
+    "index_wait": "REF:read-pipeline/spec.json#index_wait",
+    "edited_handle": "REF:read-symbols/spec.json#edited_handle",
+    "pagination": "REF:read-text-search/spec.json#pagination",
+    "search_text_matching": "REF:read-text-search/spec.json#search_text_matching",
+    "read_cancellation": "REF:read-pipeline/spec.json#read_cancellation",
+    "libraries_scope": "REF:read-pipeline/spec.json#libraries_scope",
+    "reference_set": "REF:read-references/spec.json#reference_set",
+    "result_collection_cap": "10000_THEN_TOO_MANY_RESULTS",
+    "page_token_reuse": "REF:read-text-search/spec.json#page_token_reuse",
+    "page_staleness_precedence": "REF:read-text-search/spec.json#page_staleness_precedence",
+    "nested_type_members": "REF:read-symbols/spec.json#nested_type_members",
+    "libraries_symbols": "REF:read-symbols/spec.json#libraries_symbols",
+    "search_restriction": "REF:read-symbols/spec.json#search_restriction",
+    "admission_refusal": "REF:read-pipeline/spec.json#admission_refusal",
+    "disposed_registry_issue": "REF:read-pipeline/spec.json#disposed_registry_issue",
+    "restored_pointer_identity": "REF:read-symbols/spec.json#restored_pointer_identity",
+    "write_action_restarts": "REF:read-pipeline/spec.json#write_action_restarts",
+    "cancellation_throwable": "REF:read-pipeline/spec.json#cancellation_throwable",
+    "reference_target_identity": "REF:read-references/spec.json#reference_target_identity",
+    "unsupported_language_hint": "REF:read-symbols/spec.json#unsupported_language_hint"
+  },
+  "requirements": [
+    {
+      "id": "SR-001",
+      "statement": "The read catalog is exactly seven operations: find_file, search_symbols, get_file_outline, get_symbol_info, find_references, read_file, search_text. Each operation has its own typed argument value that validates every bound at construction, and no model-visible generic dispatcher exists. The text query arguments are the find_file query, the search_symbols name and the search_text query. Each contains no CR or LF and holds at most 1,000 UTF-16 code units; the find_file and search_text queries are nonempty, and the search_symbols name is empty (SR-006) or a Java identifier. A find_file query contains no '\\', does not start or end with '/', and has no empty, '.' or '..' segment. An argument that fails validation is rejected before admission and before any IntelliJ access.",
+      "acceptance": [
+        "AC-001"
+      ]
+    },
+    {
+      "id": "SR-002",
+      "statement": "Result bounds: find_file, search_symbols, find_references and search_text accept limit 1–100, default 50; get_file_outline returns pages of at most 100 entries; read_file returns at most 300 lines and 24 KiB of UTF-8; get_symbol_info returns at most 300 lines and 24 KiB of declaration source (SR-008); every match or reference excerpt is at most 500 UTF-16 code units with an explicit truncated flag (SR-010). Paged operations collect at most the result collection cap before sorting; the cap is an injected bound with production value 10,000. When a query has more results than the cap, the operation returns TOO_MANY_RESULTS with a hint to narrow the scope and no page. No result value can exceed its bound.",
+      "acceptance": [
+        "AC-033"
+      ]
+    },
+    {
+      "id": "SR-012",
+      "statement": "One session-local registry holds symbol handles, read handles and page tokens with a total bound of 2,048 entries and least-recently-used eviction; issuing, reusing (SR-011) or successfully looking up an entry refreshes its recency. Each entry has one kind (symbol handle, read handle or page token), and each lookup is for one kind; an identifier of another kind is unknown to that lookup. The registry domain type is generic over an opaque payload type supplied by the adapter; it never inspects or compares payloads and invokes the adapter release action on eviction and disposal. An evicted, unknown, wrong-kind or other-session symbol or read handle returns STALE_HANDLE with a rediscovery hint; an evicted, unknown, wrong-kind or other-session page token returns STALE_PAGE. An issue on a disposed registry registers nothing and returns a disposed result.",
+      "acceptance": [
+        "AC-012"
+      ]
+    },
+    {
+      "id": "SR-014",
+      "statement": "A read handle is an immutable value of file identity, the document modification stamp observed at the read, and the exact inspected line and offset ranges; construction rejects a start after its end, negative offsets and line values below 1. get_symbol_info and read_file create read handles. This feature performs no mutation with a read handle.",
+      "acceptance": [
+        "AC-029"
+      ]
+    },
+    {
+      "id": "SR-021",
+      "statement": "Java domain values for read arguments, outcomes, handles, page tokens and the generic registry contain no IntelliJ platform, JSON or coroutine types. IntelliJ types, including smart pointers inside registry payloads, exist only in read adapters. The execution path uses no MCP, HTTP or runtime reflection, and no handle exposes a PSI pointer.",
+      "acceptance": [
+        "AC-018"
+      ]
+    },
+    {
+      "id": "SR-022",
+      "statement": "Every read outcome value is deeply immutable: it holds only strings, primitives, domain values and unmodifiable copies of collections, and no platform object. Changing an input collection after construction, or changing editor, index or file state, does not change an outcome that was already produced. Read outcomes appended as accepted tool results keep the CacheGeneration prefix invariant across changing IDE state.",
+      "acceptance": [
+        "AC-023"
+      ]
+    },
+    {
+      "id": "SR-023",
+      "statement": "Disposing the registry at New Session or content close invalidates every symbol handle, read handle and page token and releases every smart pointer. A later lookup returns STALE_HANDLE or STALE_PAGE. A handle from a disposed registry never resolves in a new registry. A read whose computation ends after disposal registers nothing and its Effect throws (SR-019).",
+      "acceptance": [
+        "AC-012"
+      ]
+    },
+    {
+      "id": "SR-024",
+      "statement": "Result ordering is deterministic: find_file by rendered path; search_symbols by qualified owner, name, signature, rendered path and start offset; get_file_outline in source order; find_references and search_text by rendered path, then start offset. Strings compare by UTF-16 code unit; an absent value sorts before any present value. Equal project state, equal registry state and equal arguments give equal outcomes, except that each get_symbol_info call issues a new read handle and each page result with more results issues a new page token.",
+      "acceptance": [
+        "AC-032"
+      ]
+    }
+  ],
+  "acceptance": [
+    {
+      "id": "AC-001",
+      "when": "Construct each read argument at, below and above every limit; with blank queries, queries containing CR or LF and queries of 1,001 UTF-16 units; with a search_symbols name that is not a Java identifier; with find_file queries containing '\\', a leading or trailing '/', and empty, '.' and '..' segments; with read_file start and end omitted, end before start and a 301-line span; and with an unrestricted empty symbol name.",
+      "then": "Valid boundary values construct and omitted read_file lines default to 1 and start plus 99; every invalid value returns a named argument rejection; no operation reaches an adapter; the catalog contains exactly seven operations.",
+      "target": "ReadArgumentsTest#argumentsEnforceCatalogBounds"
+    },
+    {
+      "id": "AC-012",
+      "when": "Fill the registry past 2,048 entries with symbol handles, read handles and page tokens while refreshing one entry; look up a read handle identifier as a symbol handle and a symbol handle identifier as a page token; then dispose the registry, issue one more entry, and look up handles and page tokens from the disposed and a new registry, using a fake payload with a recording release action.",
+      "then": "The least-recently-used entry is evicted and returns STALE_HANDLE or STALE_PAGE by entry kind and its payload is released; the refreshed entry survives; the wrong-kind lookups return STALE_HANDLE and STALE_PAGE; after disposal the issue returns the disposed result and registers nothing, every handle returns STALE_HANDLE, every token STALE_PAGE and every payload is released once; nothing resolves in the new registry.",
+      "target": "HandleRegistryTest#evictionAndDisposalInvalidateHandles"
+    },
+    {
+      "id": "AC-018",
+      "when": "Inspect compiled dependencies of the read domain package and read adapter package.",
+      "then": "Domain classes depend only on Java, annotations, lifecycle and run domain packages; IntelliJ types appear only in adapters; JSON, coroutine, MCP and HTTP types are absent.",
+      "target": "SemanticReadArchitectureTest#readDomainHasNoPlatformJsonOrCoroutineTypes"
+    },
+    {
+      "id": "AC-023",
+      "when": "Construct each read outcome from mutable input lists, then mutate the lists.",
+      "then": "Every outcome stays equal to a copy taken at construction; no outcome component type belongs to a platform package.",
+      "target": "ReadOutcomeTest#outcomesAreImmutableSnapshots"
+    },
+    {
+      "id": "AC-029",
+      "when": "Construct read handles with a start after its end, negative offsets, a line value of 0, and valid ranges.",
+      "then": "Invalid values are rejected at construction; a valid read handle keeps its file identity, version and ranges unchanged.",
+      "target": "ReadOutcomeTest#readHandlesValidateRanges"
+    },
+    {
+      "id": "AC-032",
+      "when": "Sort unordered candidates, references, matches and files that share key prefixes, have absent owners and contain non-BMP characters, with each operation's comparator.",
+      "then": "Each list follows its SR-024 keys by UTF-16 code unit, absent values first, with ties broken by the next key; sorting a sorted list does not change it.",
+      "target": "ReadOrderingTest#comparatorsFollowCatalogKeys"
+    },
+    {
+      "id": "AC-033",
+      "when": "Construct result values at and above each bound: a page of 101 entries, an excerpt of 501 UTF-16 units, source of 301 lines and of 24 KiB plus one byte, and a collection cap of 0.",
+      "then": "Values at a bound construct; every value above a bound and the zero cap are rejected at construction.",
+      "target": "ReadOutcomeTest#resultValuesEnforceBounds"
+    }
+  ],
+  "type_safety_audit": [
+    {
+      "requirement": "SR-001",
+      "invalid": "An eighth read operation, a dispatcher operation, or an out-of-bound argument reaching an IntelliJ adapter",
+      "type_api_prevention": "Sealed read-operation algebra with one record per operation; controlled factories return a validated argument or a named argument rejection",
+      "residual_runtime_obligation": "Wire JSON is parsed into these factories by the later codec feature",
+      "justification": "The seven-tool ceiling is a product contract; argument values come from an unsound boundary"
+    },
+    {
+      "requirement": "SR-002",
+      "invalid": "A page, source block or excerpt larger than its bound",
+      "type_api_prevention": "Bounded result collections and text values validate size at construction; limits and the collection cap are validated components; a sealed outcome has a TooManyResults variant without a page",
+      "residual_runtime_obligation": "Adapter stops collecting at the collection cap plus one, sorts the collected results, then slices the page",
+      "justification": "Output bounds are I12 correctness requirements, not tuning"
+    },
+    {
+      "requirement": "SR-012",
+      "invalid": "Unbounded handle growth, an evicted handle resolving to a different element, an identifier resolving to a payload of another kind, or an entry registered after disposal",
+      "type_api_prevention": "Final generic registry with a private bounded access-ordered map, one typed key per entry kind so that a lookup returns only that kind's payload, an opaque payload type parameter, a release callback, a sealed lookup outcome and a sealed issue outcome with a disposed variant",
+      "residual_runtime_obligation": "Registry synchronizes issue, lookup, eviction and disposal; adapter supplies the release action",
+      "justification": "Eviction order depends on runtime access sequence"
+    },
+    {
+      "requirement": "SR-014",
+      "invalid": "A read handle whose ranges or version change after issue",
+      "type_api_prevention": "Final read-handle class with a controlled factory that validates range order, nonnegative offsets and line values of at least 1 and stores immutable ranges and version",
+      "residual_runtime_obligation": "None in this feature; mutation features revalidate the version at commit",
+      "justification": "Mutations in later features depend on this evidence"
+    },
+    {
+      "requirement": "SR-021",
+      "invalid": "PsiElement, VirtualFile, Document or JSON types in domain values",
+      "type_api_prevention": "Separate domain and adapter packages; the registry is generic over an adapter payload type; package-private adapter construction",
+      "residual_runtime_obligation": "Architecture test inspects compiled dependencies",
+      "justification": "Build dependencies and later edits can break layering"
+    },
+    {
+      "requirement": "SR-022",
+      "invalid": "An accepted read result whose content changes when the IDE state changes",
+      "type_api_prevention": "Outcome values are final classes or records that copy collections into unmodifiable lists at construction and accept only domain component types",
+      "residual_runtime_obligation": "Architecture test (AC-018) and value-equality test (AC-023); prefix regression (AC-019)",
+      "justification": "I13 requires mutable IDE state never to change an existing prefix"
+    },
+    {
+      "requirement": "SR-023",
+      "invalid": "An old-session handle resolving after New Session",
+      "type_api_prevention": "Registry identity embedded in handle and token values; disposed registry rejects every lookup",
+      "residual_runtime_obligation": "Session owner calls dispose at New Session and content close",
+      "justification": "Session lifetime is owned by tool-window content (SESSION_OWNER)"
+    },
+    {
+      "requirement": "SR-024",
+      "invalid": "Order that depends on index iteration or hash order",
+      "type_api_prevention": "Ordered immutable result lists and one comparator per operation",
+      "residual_runtime_obligation": "Adapter sorts collected results before paging",
+      "justification": "Stable order is required for truthful paging and cache stability"
+    }
+  ],
+  "audit_dimensions": [
+    "sum types",
+    "state payloads",
+    "validated values",
+    "constructor authority",
+    "transitions",
+    "argument/result correlation",
+    "collection invariants",
+    "aliasing/ownership",
+    "protocol progression",
+    "visibility",
+    "nullness"
+  ],
+  "non_goals": [
+    "Wire JSON argument parsing, tool schemas, tool descriptions, the LLM status/code/content envelope and ToolOutcome content rendering",
+    "Mutations, handle invalidation on agent edits, formatting, diagnostics, build and test execution",
+    "Regex search, case-insensitive search, glob file patterns and whole-project unscoped text search",
+    "Semantic support or parity claims for languages other than Java",
+    "Session owner wiring, New Session UI and tool-window content lifetime integration beyond a registry dispose operation",
+    "Persisting handles, page tokens or read results across sessions",
+    "MCP, HTTP, idea-facade or any second index beside IntelliJ",
+    "Changing CAP-LIFECYCLE-ADMISSION or CAP-DOMAIN-RUN-DRIVER declarations or semantics",
+    "Requirements, operations and acceptance owned by the other semantic reads slices"
+  ],
+  "assumptions": [
+    "Requirement IDs are unique across the five semantic reads slices, which replace CAP-SEMANTIC-READS. A reference to a requirement outside this spec names the slice that owns it: read-domain SR-001, SR-002, SR-012, SR-014, SR-021, SR-022, SR-023, SR-024; read-pipeline SR-003, SR-004, SR-005, SR-015, SR-016, SR-019, SR-020, SR-026; read-text-search SR-010, SR-017; read-symbols SR-006, SR-007, SR-008, SR-011, SR-013, SR-018, SR-025; read-references SR-009, SR-027.",
+    "CAP-LIFECYCLE-ADMISSION is frozen with FINAL_GATE_PASS; its S3 is blocked only on EV-SURFACE. This feature relies on its admission semantics, and this feature's S3 cannot close while lifecycle S3 remains blocked.",
+    "CAP-DOMAIN-RUN-DRIVER is closed; reads bind to its PlannedCall.ToolOperation, ToolRunner and CallAdmission surfaces without changing them.",
+    "Normalizations of product bounds: limit 1–100 with default 50 for find_references; 300 lines and 24 KiB for get_symbol_info source with SOURCE_TOO_LARGE above it; 1,000 UTF-16 units for text queries; LINE_EXCEEDS_BYTE_CAP as the explicit error for a start line above 24 KiB (product 'smaller read or explicit unsupported error').",
+    "Normalizations of product terms: SR-025 range, signature, owner and containing-declaration definitions; SR-006 catalog declaration kinds; SR-003 line model and defaults; SR-004 path rendering and check order; SR-010 match and excerpt rule and skipped-file count; SR-020 READ_FAILED category rule; SR-026 failure precedence; SR-001 query validation; SR-004 canonical root comparison; SR-009 reference range, line and kind; SR-010 document offsets and match column; SR-025 parameter type text, array dimensions and compact constructors; SR-012 entry kinds."
+  ],
+  "evidence": [
+    {
+      "id": "EV-SOURCE",
+      "kind": "source",
+      "description": "Split from CAP-SEMANTIC-READS revision 2 (spec digest 13183292b057ec708e01744089e3b3e82455cfc77112b3e5e54d82bad5687586) by owner decision 2026-09-15. Product authority (Tool catalog Reads and identity, I5, I6, I7, I10, I12, I13, QUALIFICATION_TARGET, SESSION_OWNER) and agent-cited reference ranges. IntelliJ: ReferencesSearch.java:123-166, IndexNotReadyException.java:47-80, NonBlockingReadAction.java:49-51, Query.kt:42, SmartPsiElementPointer.java:22-54, Document.java:183-192, FileViewProvider.java:143-149, FileDocumentManager.java:41-56, PsiShortNamesCache.java:64-144, FilenameIndex.java:79-158, ProjectFileIndex.java:160-224, ProjectScope.java:44-91, FindInProjectUtil.java:299-326, FindInProjectTask.java:366-423, LanguageStructureViewBuilder.java:25-34. Pi: coding-agent tools read.ts:14-166, truncate.ts:11-13, grep.ts:21-300, find.ts:26-284, agent-loop.ts:708-771. Reread line by line in specification review Round 1: QueryExecutorBase.java:57-66, PsiModificationTracker.java:56-60,99-106, PsiModificationTrackerImpl.java:47-61, DumbService.kt:110-125, NonBlockingReadAction.java:45-63, FileViewProvider.java:143-149, Query.kt:34-42, SmartPsiElementPointer.java:16-26, FindInProjectTask.java:395-403. Owner decisions 2026-09-15 Round 1: read cancellation, libraries scope, reference set, collection cap. Donor on master: ToolReadinessGate.java INDEX_WAIT_MS 30000 and permissive failure, SearchSymbolsTool.java:69-170. Reread through ij-search and pi-search answers in specification review Round 2: JavaSourceFilterScope.java:36-51, PsiClassImplUtil.java:1162-1228,1251-1273, SmartPsiElementPointerImpl.java:90-115, DumbServiceImpl.kt:335-342,373-383, NonBlockingReadActionImpl.java:639-641,696-704,808-814, PsiModificationTrackerImpl.java:47-56,99-106,120-127, PsiDocumentManagerBase.java:1149,1314, PsiVFSListener.java:34-39,139-148, FileDocumentManagerBase.java:73-80, GeneratedSourcesFilter.kt:29-44; Pi read.ts:136-156, grep.ts:25-41. Frozen dependency surfaces: RunSession.java:157-219, RunCancellation.java:27-45, NativeRunDriver.kt:156-199. Owner decisions 2026-09-15 Round 2: page token reuse, page staleness precedence, nested type members, libraries symbols, search restriction, admission refusal, disposed registry issue, restored pointer identity, write-action restarts, cancellation throwable, reference target identity, unsupported language hint."
+    },
+    {
+      "id": "EV-STRUCTURE",
+      "kind": "command",
+      "description": "Strict parse plus identity, reference, audit, matrix, null-boundary and stage-binding checks for CAP-READ-DOMAIN."
+    },
+    {
+      "id": "EV-SPEC-REVIEW",
+      "kind": "review",
+      "description": "Fresh semantic review of the exact specification digest with zero unresolved blocking findings."
+    },
+    {
+      "id": "EV-DESIGN-SOURCE",
+      "kind": "source",
+      "description": "Frozen Java domain and adapter declarations installed once in production and mapped bidirectionally to requirements."
+    },
+    {
+      "id": "EV-DESIGN-COMPILE",
+      "kind": "command",
+      "description": "User-executed :plugin-core:classes result for the exact frozen declarations and build configuration."
+    },
+    {
+      "id": "EV-DESIGN-REVIEW",
+      "kind": "review",
+      "description": "Fresh two-direction semantic and type-safety review of the exact spec, design and declarations with zero unresolved blocking findings."
+    },
+    {
+      "id": "EV-RECEIPT",
+      "kind": "tool",
+      "description": "Exact-basis receipt binding feature, spec, design, declarations, configuration, evidence and status hashes, including direct-compile and Gradle log digests."
+    },
+    {
+      "id": "EV-FOCUSED",
+      "kind": "command",
+      "description": "Platform-free read domain and registry tests with nonzero discovered tests and passing counts."
+    },
+    {
+      "id": "EV-BUILD",
+      "kind": "command",
+      "description": "User-executed affected plugin-core build and buildPlugin results."
+    },
+    {
+      "id": "EV-IMPLEMENTATION-REVIEW",
+      "kind": "review",
+      "description": "Independent bounded review against the frozen surface with all Blockers and Majors resolved."
+    }
+  ],
+  "stages": [
+    {
+      "id": "S1",
+      "entry": [
+        {
+          "requirements": [
+            "SR-001",
+            "SR-002"
+          ],
+          "evidence": [
+            "EV-SOURCE"
+          ]
+        }
+      ],
+      "exit": [
+        {
+          "requirements": [
+            "SR-001",
+            "SR-002",
+            "SR-012",
+            "SR-014",
+            "SR-021",
+            "SR-022",
+            "SR-023",
+            "SR-024"
+          ],
+          "evidence": [
+            "EV-STRUCTURE",
+            "EV-SPEC-REVIEW"
+          ]
+        }
+      ],
+      "outcome": "SPEC_VALID for the exact normalized feature basis; no design or implementation claim"
+    },
+    {
+      "id": "S2",
+      "depends_on": [
+        "S1"
+      ],
+      "entry": [
+        {
+          "requirements": [
+            "SR-001",
+            "SR-002"
+          ],
+          "evidence": [
+            "EV-STRUCTURE",
+            "EV-SPEC-REVIEW"
+          ]
+        }
+      ],
+      "exit": [
+        {
+          "requirements": [
+            "SR-001",
+            "SR-002",
+            "SR-012",
+            "SR-014",
+            "SR-021",
+            "SR-022",
+            "SR-023",
+            "SR-024"
+          ],
+          "evidence": [
+            "EV-DESIGN-SOURCE",
+            "EV-DESIGN-COMPILE",
+            "EV-DESIGN-REVIEW",
+            "EV-RECEIPT"
+          ]
+        }
+      ],
+      "outcome": "DESIGN_VALID; implementation surface frozen"
+    },
+    {
+      "id": "S3",
+      "depends_on": [
+        "S2"
+      ],
+      "entry": [
+        {
+          "requirements": [
+            "SR-001",
+            "SR-002"
+          ],
+          "evidence": [
+            "EV-DESIGN-SOURCE",
+            "EV-DESIGN-COMPILE",
+            "EV-DESIGN-REVIEW",
+            "EV-RECEIPT"
+          ]
+        }
+      ],
+      "exit": [
+        {
+          "requirements": [
+            "SR-001",
+            "SR-002",
+            "SR-012",
+            "SR-014",
+            "SR-021",
+            "SR-022",
+            "SR-023",
+            "SR-024"
+          ],
+          "evidence": [
+            "EV-FOCUSED",
+            "EV-BUILD",
+            "EV-IMPLEMENTATION-REVIEW"
+          ]
+        }
+      ],
+      "outcome": "CAP-READ-DOMAIN closure qualified"
+    }
+  ],
+  "open_decisions": [],
+  "operation_matrix": [
+    {
+      "operation": "any read",
+      "phase": "BEFORE_ADMISSION",
+      "precondition": "argument validation fails",
+      "result": "Argument rejection from the codec; no admission and no IntelliJ access",
+      "next_phase": "unchanged"
+    },
+    {
+      "operation": "any lookup",
+      "phase": "REGISTRY_DISPOSED",
+      "result": "STALE_HANDLE or STALE_PAGE",
+      "next_phase": "REGISTRY_DISPOSED"
+    },
+    {
+      "operation": "dispose registry",
+      "phase": "SMART|INDEXING|STOPPING|PROJECT_UNAVAILABLE",
+      "result": "Invalidate all handles and tokens; release every payload once",
+      "next_phase": "REGISTRY_DISPOSED"
+    },
+    {
+      "operation": "dispose registry",
+      "phase": "REGISTRY_DISPOSED",
+      "result": "No effect",
+      "next_phase": "REGISTRY_DISPOSED"
+    }
+  ],
+  "receipt_identity": {
+    "fields": [
+      "stage",
+      "feature",
+      "spec_hash",
+      "design_hash",
+      "declaration_hashes",
+      "configuration_identity",
+      "evidence_input_hashes",
+      "evidence_hashes",
+      "status"
+    ],
+    "volatile_fields_excluded_from_digest": [
+      "timestamp"
+    ]
+  },
+  "null_boundary_matrix": [
+    {
+      "operation": "read argument factories",
+      "null_input": "path, query, scope, restriction, handle, page token, line or limit component",
+      "expected": "NullPointerException before an argument value exists; optional components are absent through explicit factory overloads or empty variants, never null"
+    },
+    {
+      "operation": "read outcome and handle constructors",
+      "null_input": "any reference component or collection element",
+      "expected": "NullPointerException before the value exists"
+    },
+    {
+      "operation": "registry issue, lookup and release",
+      "null_input": "payload, handle identifier, page token or release action",
+      "expected": "NullPointerException before registry mutation"
+    }
+  ]
+}

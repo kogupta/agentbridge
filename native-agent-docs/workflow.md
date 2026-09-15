@@ -213,7 +213,12 @@ A slice's stage bindings are in its `spec.json`. Its state is only the Current s
 |---|---|---|
 | `lifecycle-admission/` | 0 | `plugin-core/.../nativeagent/lifecycle/` |
 | `domain-run-driver/` | 1 | `plugin-core/.../nativeagent/run/` (Java and Kotlin) |
-| `semantic-reads/` | 2 | Not installed (specification draft) |
+| `semantic-reads/` | 2 | Superseded by the five read slices below; no code |
+| `read-domain/` | 2 (R1) | Not installed (specification draft) |
+| `read-pipeline/` | 2 (R2) | Not installed (specification draft) |
+| `read-text-search/` | 2 (R3) | Not installed (specification draft) |
+| `read-symbols/` | 2 (R4) | Not installed (specification draft) |
+| `read-references/` | 2 (R5) | Not installed (specification draft) |
 
 ## Lifecycle/admission slice stages
 

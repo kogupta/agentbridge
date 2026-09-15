@@ -1,0 +1,324 @@
+{
+  "format_version": 1,
+  "feature": "CAP-READ-TEXT-SEARCH",
+  "scope": "Literal text search and pagination: search_text over current document text and page-token continuation and staleness for every paged read. Depends on CAP-READ-PIPELINE. Wire JSON argument parsing, tool schemas, the LLM status/code/content envelope and rendering of read outcomes into ToolOutcome content are excluded and belong to the codec feature.",
+  "decisions": {
+    "core_language": "REF:product.md#CORE_LANGUAGE",
+    "qualification_target": "REF:product.md#QUALIFICATION_TARGET",
+    "session_owner": "REF:product.md#SESSION_OWNER",
+    "outcomes": "REF:product.md#OUTCOMES",
+    "reflection": "REF:product.md#REFLECTION",
+    "async": "REF:product.md#ASYNC",
+    "observability": "REF:product.md#OBSERVABILITY",
+    "prompt_cache": "REF:product.md#PROMPT_CACHE",
+    "donor_subtraction": "REF:product.md#DONOR_SUBTRACTION",
+    "index_wait": "REF:read-pipeline/spec.json#index_wait",
+    "edited_handle": "REF:read-symbols/spec.json#edited_handle",
+    "pagination": "PSI_MODIFICATION_COUNT_BOUND_TOKEN_STALE_PAGE",
+    "search_text_matching": "LITERAL_CASE_SENSITIVE_500_CHAR_EXCERPT",
+    "read_cancellation": "REF:read-pipeline/spec.json#read_cancellation",
+    "libraries_scope": "REF:read-pipeline/spec.json#libraries_scope",
+    "reference_set": "REF:read-references/spec.json#reference_set",
+    "result_collection_cap": "REF:read-domain/spec.json#result_collection_cap",
+    "page_token_reuse": "REPLAYABLE_WHILE_LIVE_NEW_TOKEN_PER_PAGE",
+    "page_staleness_precedence": "COUNT_CHECK_BEFORE_INDEX_WAIT",
+    "nested_type_members": "REF:read-symbols/spec.json#nested_type_members",
+    "libraries_symbols": "REF:read-symbols/spec.json#libraries_symbols",
+    "search_restriction": "REF:read-symbols/spec.json#search_restriction",
+    "admission_refusal": "REF:read-pipeline/spec.json#admission_refusal",
+    "disposed_registry_issue": "REF:read-pipeline/spec.json#disposed_registry_issue",
+    "restored_pointer_identity": "REF:read-symbols/spec.json#restored_pointer_identity",
+    "write_action_restarts": "REF:read-pipeline/spec.json#write_action_restarts",
+    "cancellation_throwable": "REF:read-pipeline/spec.json#cancellation_throwable",
+    "reference_target_identity": "REF:read-references/spec.json#reference_target_identity",
+    "unsupported_language_hint": "REF:read-symbols/spec.json#unsupported_language_hint"
+  },
+  "requirements": [
+    {
+      "id": "SR-010",
+      "statement": "search_text takes a required scope path (SR-004) and a literal query (SR-001), matched case-sensitively; regex is excluded. A directory scope searches its files recursively and omits excluded, generated and binary files; text files too large for content loading are omitted and counted in a skipped-file count carried on every page. A file scope searches that file; a binary file scope, or a file scope that the platform does not load as text content, returns UNSUPPORTED_FILE. The search reads current document text, including unsaved changes. Each non-overlapping match, scanned left to right, is one result with rendered path, 1-based line, start and end offsets as 0-based end-exclusive UTF-16 document offsets, and an excerpt. The match column is the match start offset minus the start offset of its line. The excerpt is the whole line when it has at most 500 UTF-16 code units; otherwise it is the 500-unit window starting at column max(0, min(matchColumn − 100, lineLength − 500)) with truncated set, shortened by one unit at each end that splits a surrogate pair. Results are ordered by rendered path, then start offset. Paged collection applies the result collection cap (SR-002): more results than the cap returns TOO_MANY_RESULTS with a narrowing hint and no page.",
+      "acceptance": [
+        "AC-010",
+        "AC-022"
+      ]
+    },
+    {
+      "id": "SR-017",
+      "statement": "The paged operations are find_file, search_symbols, get_file_outline, find_references and search_text. A page result is either complete or has more results with a next-page token. A page token is a registry entry (SR-012) bound to the operation, the full argument set without the token, the session registry, the PSI modification count observed when the first page was computed, and the next offset. A next-page request repeats the argument set and adds the token; a different limit is a different argument set. Each page result that has more results issues a new token for the following page. A token stays valid after use: while it is live and still matches, a repeated request with it returns the same page again. A next-page request returns STALE_PAGE when the token is unknown, evicted, of another kind or from another registry, when the operation or argument set differs, or when the PSI modification count differs. The count is compared before any wait for indexing (SR-026), in a read computation with documents committed, and again inside the operation's read computation. Because computations run with committed documents (SR-015), unsaved edits change the count. Dumb-mode entry and exit also change the count, so indexing between pages returns STALE_PAGE by design, without a wait. Ordering is deterministic within one modification count.",
+      "acceptance": [
+        "AC-016"
+      ]
+    }
+  ],
+  "acceptance": [
+    {
+      "id": "AC-010",
+      "when": "search_text a literal in a directory scope where matches differ by case, one match is in an unsaved editor, one file is generated, one is excluded, one is binary, one text file exceeds the content-loading limit, one line holds two non-overlapping matches, and one match starts at column 800 of a 2,000-unit line; also search_text with the binary file and with the file above the content-loading limit as the file scope.",
+      "then": "Only case-sensitive matches in current document text are returned; generated, excluded and binary files are absent; the skipped-file count is 1; the two matches on one line are two results; each result's start and end are document offsets; the long-line excerpt is the 500-unit window starting at column 700 with truncated set; both file scopes return UNSUPPORTED_FILE.",
+      "target": "SemanticReadIdeTest#searchTextIsLiteralCaseSensitiveAndBounded"
+    },
+    {
+      "id": "AC-016",
+      "when": "Hold smart mode constant. Request page one of search_text with limit 1, request page two without a change, repeat the page-two request with the same token, then make an unsaved document edit in the project and request page two again; reuse a token with a different limit, with find_file and in a new registry. Separately, with the index wait bound injected as 200 ms, request page one of search_text, enter dumb mode, and request page two.",
+      "then": "Unchanged state continues in deterministic order to a complete final page, and the repeated page-two request returns the same page again; the request after the unsaved edit, the different limit, the other operation and the new registry return STALE_PAGE; the request after dumb-mode entry returns STALE_PAGE before 200 ms elapse.",
+      "target": "SemanticReadIdeTest#pageTokensRejectChangedState"
+    },
+    {
+      "id": "AC-022",
+      "when": "With the result collection cap injected as 3, call search_text for a literal with 4 matches, and for a literal with 3 matches and limit 2.",
+      "then": "The first returns TOO_MANY_RESULTS with a narrowing hint and no page; the second returns a page of 2 with a next-page token and then a complete page of 1.",
+      "target": "SemanticReadIdeTest#textSearchCollectionCapFailsClosed"
+    }
+  ],
+  "type_safety_audit": [
+    {
+      "requirement": "SR-010",
+      "invalid": "Regex or case-insensitive matching, a whole-project scan without explicit scope, stale disk text, an excerpt that does not contain its match start, or a silent empty result for an unreadable file scope",
+      "type_api_prevention": "Literal query value and required scope component; no regex or case option exists in the argument type",
+      "residual_runtime_obligation": "Adapter scans current document text for literal non-overlapping matches, computes the excerpt window and counts skipped large files",
+      "justification": "Text content and file classification are runtime state"
+    },
+    {
+      "requirement": "SR-017",
+      "invalid": "A later page that silently skips or repeats items after a project change, or a replayed token that returns a different page",
+      "type_api_prevention": "Continuation sum type Complete or More(token); token is a registry entry constructible only by the registry and bound to operation, arguments and count",
+      "residual_runtime_obligation": "Adapter compares the current PSI modification count before the index wait and again inside the computation, and recomputes the page from the token offset",
+      "justification": "Project PSI changes between model turns"
+    }
+  ],
+  "audit_dimensions": [
+    "sum types",
+    "state payloads",
+    "validated values",
+    "constructor authority",
+    "transitions",
+    "argument/result correlation",
+    "collection invariants",
+    "aliasing/ownership",
+    "protocol progression",
+    "visibility",
+    "nullness"
+  ],
+  "non_goals": [
+    "Wire JSON argument parsing, tool schemas, tool descriptions, the LLM status/code/content envelope and ToolOutcome content rendering",
+    "Mutations, handle invalidation on agent edits, formatting, diagnostics, build and test execution",
+    "Regex search, case-insensitive search, glob file patterns and whole-project unscoped text search",
+    "Semantic support or parity claims for languages other than Java",
+    "Session owner wiring, New Session UI and tool-window content lifetime integration beyond a registry dispose operation",
+    "Persisting handles, page tokens or read results across sessions",
+    "MCP, HTTP, idea-facade or any second index beside IntelliJ",
+    "Changing CAP-LIFECYCLE-ADMISSION or CAP-DOMAIN-RUN-DRIVER declarations or semantics",
+    "Requirements, operations and acceptance owned by the other semantic reads slices"
+  ],
+  "assumptions": [
+    "Requirement IDs are unique across the five semantic reads slices, which replace CAP-SEMANTIC-READS. A reference to a requirement outside this spec names the slice that owns it: read-domain SR-001, SR-002, SR-012, SR-014, SR-021, SR-022, SR-023, SR-024; read-pipeline SR-003, SR-004, SR-005, SR-015, SR-016, SR-019, SR-020, SR-026; read-text-search SR-010, SR-017; read-symbols SR-006, SR-007, SR-008, SR-011, SR-013, SR-018, SR-025; read-references SR-009, SR-027.",
+    "IntelliJ JUnit 5 test fixtures for a Java project with editors, libraries, generated and excluded roots, dumb mode and a test reference query executor are available through the IntelliJ Platform Gradle test framework configuration; the design may change plugin-core/build.gradle.kts for this and must keep tests discoverable as @Test methods.",
+    "Only the document modification stamp changes on unsaved edits; the view provider stamp stays at the last committed stamp. The PSI modification count changes on committed physical PSI changes and on dumb-mode entry and exit, not on uncommitted edits.",
+    "Normalizations of product terms: SR-025 range, signature, owner and containing-declaration definitions; SR-006 catalog declaration kinds; SR-003 line model and defaults; SR-004 path rendering and check order; SR-010 match and excerpt rule and skipped-file count; SR-020 READ_FAILED category rule; SR-026 failure precedence; SR-001 query validation; SR-004 canonical root comparison; SR-009 reference range, line and kind; SR-010 document offsets and match column; SR-025 parameter type text, array dimensions and compact constructors; SR-012 entry kinds.",
+    "Normalizations of scope: generated sources are omitted from find_file, unrestricted search_symbols and search_text directory scans, and included and marked in find_references so reference sets stay complete; handle reuse for the same element (SR-011) keeps one live handle per element in the registry.",
+    "The product rule 'reports partial search/index readiness separately' is satisfied by fail-closed INDEX_NOT_READY and TOO_MANY_RESULTS outcomes, because the platform gives no partial-result signal.",
+    "The PSI modification count also changes for document and VFS changes to project-content files whose PSI is not loaded (PsiDocumentManagerBase.java:1149,1314; PsiVFSListener.java:139-148), so SR-017 staleness covers find_file and search_text over unloaded files."
+  ],
+  "evidence": [
+    {
+      "id": "EV-SOURCE",
+      "kind": "source",
+      "description": "Split from CAP-SEMANTIC-READS revision 2 (spec digest 13183292b057ec708e01744089e3b3e82455cfc77112b3e5e54d82bad5687586) by owner decision 2026-09-15. Product authority (Tool catalog Reads and identity, I5, I6, I7, I10, I12, I13, QUALIFICATION_TARGET, SESSION_OWNER) and agent-cited reference ranges. IntelliJ: ReferencesSearch.java:123-166, IndexNotReadyException.java:47-80, NonBlockingReadAction.java:49-51, Query.kt:42, SmartPsiElementPointer.java:22-54, Document.java:183-192, FileViewProvider.java:143-149, FileDocumentManager.java:41-56, PsiShortNamesCache.java:64-144, FilenameIndex.java:79-158, ProjectFileIndex.java:160-224, ProjectScope.java:44-91, FindInProjectUtil.java:299-326, FindInProjectTask.java:366-423, LanguageStructureViewBuilder.java:25-34. Pi: coding-agent tools read.ts:14-166, truncate.ts:11-13, grep.ts:21-300, find.ts:26-284, agent-loop.ts:708-771. Reread line by line in specification review Round 1: QueryExecutorBase.java:57-66, PsiModificationTracker.java:56-60,99-106, PsiModificationTrackerImpl.java:47-61, DumbService.kt:110-125, NonBlockingReadAction.java:45-63, FileViewProvider.java:143-149, Query.kt:34-42, SmartPsiElementPointer.java:16-26, FindInProjectTask.java:395-403. Owner decisions 2026-09-15 Round 1: read cancellation, libraries scope, reference set, collection cap. Donor on master: ToolReadinessGate.java INDEX_WAIT_MS 30000 and permissive failure, SearchSymbolsTool.java:69-170. Reread through ij-search and pi-search answers in specification review Round 2: JavaSourceFilterScope.java:36-51, PsiClassImplUtil.java:1162-1228,1251-1273, SmartPsiElementPointerImpl.java:90-115, DumbServiceImpl.kt:335-342,373-383, NonBlockingReadActionImpl.java:639-641,696-704,808-814, PsiModificationTrackerImpl.java:47-56,99-106,120-127, PsiDocumentManagerBase.java:1149,1314, PsiVFSListener.java:34-39,139-148, FileDocumentManagerBase.java:73-80, GeneratedSourcesFilter.kt:29-44; Pi read.ts:136-156, grep.ts:25-41. Frozen dependency surfaces: RunSession.java:157-219, RunCancellation.java:27-45, NativeRunDriver.kt:156-199. Owner decisions 2026-09-15 Round 2: page token reuse, page staleness precedence, nested type members, libraries symbols, search restriction, admission refusal, disposed registry issue, restored pointer identity, write-action restarts, cancellation throwable, reference target identity, unsupported language hint."
+    },
+    {
+      "id": "EV-STRUCTURE",
+      "kind": "command",
+      "description": "Strict parse plus identity, reference, audit, matrix, null-boundary and stage-binding checks for CAP-READ-TEXT-SEARCH."
+    },
+    {
+      "id": "EV-SPEC-REVIEW",
+      "kind": "review",
+      "description": "Fresh semantic review of the exact specification digest with zero unresolved blocking findings."
+    },
+    {
+      "id": "EV-DESIGN-SOURCE",
+      "kind": "source",
+      "description": "Frozen Java domain and adapter declarations installed once in production and mapped bidirectionally to requirements."
+    },
+    {
+      "id": "EV-DESIGN-COMPILE",
+      "kind": "command",
+      "description": "User-executed :plugin-core:classes result for the exact frozen declarations and build configuration."
+    },
+    {
+      "id": "EV-DESIGN-REVIEW",
+      "kind": "review",
+      "description": "Fresh two-direction semantic and type-safety review of the exact spec, design and declarations with zero unresolved blocking findings."
+    },
+    {
+      "id": "EV-RECEIPT",
+      "kind": "tool",
+      "description": "Exact-basis receipt binding feature, spec, design, declarations, configuration, evidence and status hashes, including direct-compile and Gradle log digests."
+    },
+    {
+      "id": "EV-IDE",
+      "kind": "command",
+      "description": "IntelliJ fixture tests for real IDE read operations, readiness, cancellation and unsaved content with nonzero discovered tests and passing counts."
+    },
+    {
+      "id": "EV-BUILD",
+      "kind": "command",
+      "description": "User-executed affected plugin-core build and buildPlugin results."
+    },
+    {
+      "id": "EV-IMPLEMENTATION-REVIEW",
+      "kind": "review",
+      "description": "Independent bounded review against the frozen surface with all Blockers and Majors resolved."
+    }
+  ],
+  "stages": [
+    {
+      "id": "S1",
+      "entry": [
+        {
+          "requirements": [
+            "SR-010",
+            "SR-017"
+          ],
+          "evidence": [
+            "EV-SOURCE"
+          ]
+        }
+      ],
+      "exit": [
+        {
+          "requirements": [
+            "SR-010",
+            "SR-017"
+          ],
+          "evidence": [
+            "EV-STRUCTURE",
+            "EV-SPEC-REVIEW"
+          ]
+        }
+      ],
+      "outcome": "SPEC_VALID for the exact normalized feature basis; no design or implementation claim"
+    },
+    {
+      "id": "S2",
+      "depends_on": [
+        "S1"
+      ],
+      "entry": [
+        {
+          "requirements": [
+            "SR-010",
+            "SR-017"
+          ],
+          "evidence": [
+            "EV-STRUCTURE",
+            "EV-SPEC-REVIEW"
+          ]
+        }
+      ],
+      "exit": [
+        {
+          "requirements": [
+            "SR-010",
+            "SR-017"
+          ],
+          "evidence": [
+            "EV-DESIGN-SOURCE",
+            "EV-DESIGN-COMPILE",
+            "EV-DESIGN-REVIEW",
+            "EV-RECEIPT"
+          ]
+        }
+      ],
+      "outcome": "DESIGN_VALID; implementation surface frozen"
+    },
+    {
+      "id": "S3",
+      "depends_on": [
+        "S2"
+      ],
+      "entry": [
+        {
+          "requirements": [
+            "SR-010",
+            "SR-017"
+          ],
+          "evidence": [
+            "EV-DESIGN-SOURCE",
+            "EV-DESIGN-COMPILE",
+            "EV-DESIGN-REVIEW",
+            "EV-RECEIPT"
+          ]
+        }
+      ],
+      "exit": [
+        {
+          "requirements": [
+            "SR-010",
+            "SR-017"
+          ],
+          "evidence": [
+            "EV-IDE",
+            "EV-BUILD",
+            "EV-IMPLEMENTATION-REVIEW"
+          ]
+        }
+      ],
+      "outcome": "CAP-READ-TEXT-SEARCH closure qualified"
+    }
+  ],
+  "open_decisions": [],
+  "operation_matrix": [
+    {
+      "operation": "next page",
+      "phase": "SMART",
+      "precondition": "token live and PSI modification count, operation, arguments and registry match",
+      "result": "Next page in deterministic order",
+      "next_phase": "SMART"
+    },
+    {
+      "operation": "next page",
+      "phase": "SMART",
+      "precondition": "token already used, still live, and PSI modification count, operation, arguments and registry match",
+      "result": "Same page again with a new next-page token when more results exist",
+      "next_phase": "SMART"
+    },
+    {
+      "operation": "next page",
+      "phase": "SMART|INDEXING",
+      "precondition": "token unknown, evicted, wrong-kind, foreign, or operation or arguments differ",
+      "result": "STALE_PAGE; restart from page one; no wait for indexing",
+      "next_phase": "unchanged"
+    },
+    {
+      "operation": "next page",
+      "phase": "SMART|INDEXING",
+      "precondition": "token matches but PSI modification count changed, including by a dumb-mode transition",
+      "result": "STALE_PAGE without waiting for indexing; restart from page one",
+      "next_phase": "unchanged"
+    }
+  ],
+  "receipt_identity": {
+    "fields": [
+      "stage",
+      "feature",
+      "spec_hash",
+      "design_hash",
+      "declaration_hashes",
+      "configuration_identity",
+      "evidence_input_hashes",
+      "evidence_hashes",
+      "status"
+    ],
+    "volatile_fields_excluded_from_digest": [
+      "timestamp"
+    ]
+  },
+  "null_boundary_matrix": [
+    {
+      "operation": "read adapter platform results",
+      "null_input": "nullable platform return such as missing document, file or resolved element",
+      "expected": "Named outcome (FILE_NOT_FOUND, UNSUPPORTED_FILE, STALE_HANDLE); never a null in a domain value"
+    }
+  ]
+}

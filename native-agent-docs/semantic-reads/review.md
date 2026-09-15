@@ -4,15 +4,11 @@ Append-only. Review rounds are tied to exact content digests. Acceptance targets
 
 ## Current state
 
-- Workflow state: SPEC_DRAFT; Round 2 findings addressed in revision 2; S1 structure check PASS; fresh review not run
-- Latest round: 2
-- Spec digest: `13183292b057ec708e01744089e3b3e82455cfc77112b3e5e54d82bad5687586`
-- Product digest at spec basis: `3ca1c39fe951862e79371b80581bb929df246430dc524ce0015d93e9e6f2624a`
-- Open Blockers: none recorded
-- Open Majors: none recorded; 12 Round 2 Majors addressed, not yet reviewed
-- Open Minors: none recorded; 11 Round 2 Minors addressed, not yet reviewed
-- Reviewer selection: external separate tool (prompt `.agent-work/native-agent-docs/semantic-reads/spec-review-prompt-r3.md`); the Round 2 reviewer session also authored revision 2 and is not eligible
-- Next permitted action: fresh independent specification review of the exact revision 2 digest (EV-SPEC-REVIEW)
+- Workflow state: SUPERSEDED; split into five slices by owner decision 2026-09-15; no gate passed on this feature
+- Final spec digest: `13183292b057ec708e01744089e3b3e82455cfc77112b3e5e54d82bad5687586` (revision 2, removed from the tree; recover it from git history)
+- Successor slices: `read-domain/`, `read-pipeline/`, `read-text-search/`, `read-symbols/`, `read-references/`
+- Round 3 prompt `.agent-work/native-agent-docs/semantic-reads/spec-review-prompt-r3.md` is obsolete; do not run it
+- Next permitted action: none on this feature; see the successor ledgers
 
 ## Round 0 — specification draft
 
@@ -161,3 +157,11 @@ Blocking findings remaining: 0
 Deferred findings: 0
 
 Next permitted action at this basis: fresh exact-digest specification review by a separate reviewer (`workflow.md` SPEC_VALID gate 5).
+
+## Split — supersede CAP-SEMANTIC-READS
+
+- Owner decision (2026-09-15): split milestone 2 into smaller slices to reduce review churn and give implementation agents bounded stages
+- Mapping: read-domain SR-001, SR-002, SR-012, SR-014, SR-021 to SR-024; read-pipeline SR-003, SR-004, SR-005, SR-015, SR-016, SR-019, SR-020, SR-026; read-text-search SR-010, SR-017; read-symbols SR-006, SR-007, SR-008, SR-011, SR-013, SR-018, SR-025; read-references SR-009 and new SR-027
+- Acceptance changes: AC-014, AC-015, AC-017, AC-024 rewritten to use read_file and find_file; AC-016, AC-017, AC-022, AC-024, AC-025 split by slice into AC-026, AC-027, AC-028, AC-031, AC-034; AC-023 keeps only its domain half; AC-029, AC-030, AC-032, AC-033 added for requirements that lost their IDE acceptance
+- Round 2 dispositions remain valid for the carried text but are not review receipts; each slice needs its own fresh review
+- `semantic-reads/spec.json` removed so that one truth exists

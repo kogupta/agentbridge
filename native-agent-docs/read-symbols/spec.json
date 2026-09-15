@@ -1,0 +1,465 @@
+{
+  "format_version": 1,
+  "feature": "CAP-READ-SYMBOLS",
+  "scope": "Java symbol identity reads: search_symbols, get_file_outline and get_symbol_info, symbol handle issue and reuse, handle re-resolution, Java-only language support and identity terms. Depends on CAP-READ-PIPELINE. Wire JSON argument parsing, tool schemas, the LLM status/code/content envelope and rendering of read outcomes into ToolOutcome content are excluded and belong to the codec feature.",
+  "decisions": {
+    "core_language": "REF:product.md#CORE_LANGUAGE",
+    "qualification_target": "REF:product.md#QUALIFICATION_TARGET",
+    "session_owner": "REF:product.md#SESSION_OWNER",
+    "outcomes": "REF:product.md#OUTCOMES",
+    "reflection": "REF:product.md#REFLECTION",
+    "async": "REF:product.md#ASYNC",
+    "observability": "REF:product.md#OBSERVABILITY",
+    "prompt_cache": "REF:product.md#PROMPT_CACHE",
+    "donor_subtraction": "REF:product.md#DONOR_SUBTRACTION",
+    "index_wait": "REF:read-pipeline/spec.json#index_wait",
+    "edited_handle": "RE_RESOLVE_AND_REPORT_CURRENT",
+    "pagination": "REF:read-text-search/spec.json#pagination",
+    "search_text_matching": "REF:read-text-search/spec.json#search_text_matching",
+    "read_cancellation": "REF:read-pipeline/spec.json#read_cancellation",
+    "libraries_scope": "REF:read-pipeline/spec.json#libraries_scope",
+    "reference_set": "REF:read-references/spec.json#reference_set",
+    "result_collection_cap": "REF:read-domain/spec.json#result_collection_cap",
+    "page_token_reuse": "REF:read-text-search/spec.json#page_token_reuse",
+    "page_staleness_precedence": "REF:read-text-search/spec.json#page_staleness_precedence",
+    "nested_type_members": "MEMBERS_OF_LOCAL_ANONYMOUS_AND_ENUM_CONSTANT_BODIES_ARE_NOT_DECLARATIONS",
+    "libraries_symbols": "ATTACHED_LIBRARY_SOURCE_DECLARATIONS_ONLY",
+    "search_restriction": "RESTRICTION_OVERRIDES_SCOPE_AND_GENERATED_NON_TYPE_OWNER_NOT_A_TYPE",
+    "admission_refusal": "REF:read-pipeline/spec.json#admission_refusal",
+    "disposed_registry_issue": "REF:read-pipeline/spec.json#disposed_registry_issue",
+    "restored_pointer_identity": "KIND_NAME_SIGNATURE_MISMATCH_STALE_HANDLE",
+    "write_action_restarts": "REF:read-pipeline/spec.json#write_action_restarts",
+    "cancellation_throwable": "REF:read-pipeline/spec.json#cancellation_throwable",
+    "reference_target_identity": "REF:read-references/spec.json#reference_target_identity",
+    "unsupported_language_hint": "CATALOG_HINT_READ_FILE_AND_SEARCH_TEXT"
+  },
+  "requirements": [
+    {
+      "id": "SR-006",
+      "statement": "search_symbols takes a case-sensitive name, a scope PROJECT (default) or LIBRARIES with the SR-005 meaning, and an optional restriction to one file path or one owner type handle. A nonempty name matches a declaration whose simple name is equal to it. Without a restriction, generated sources are omitted in both scopes, and the library candidates of LIBRARIES are declarations in attached library source files; a compiled library class without attached sources is not a candidate. An empty name is valid only with a restriction. A restriction overrides scope and generated-source filtering. A file restriction lists every catalog declaration in that file at any nesting depth; an owner type restriction lists the declarations directly declared in that type, including nested types but not their members and not inherited members. An owner type handle whose element is not a class, interface, enum, record or annotation type returns NOT_A_TYPE. A nonempty name with a restriction matches only inside the restriction. The catalog declaration kinds are Java class, interface, enum, record, annotation type, method, constructor, field and enum constant written in source. Local classes, anonymous classes, any declaration inside a local class, anonymous class or enum-constant body, record components, implicit constructors, initializers and lambdas are not declarations. A constructor matches the name of its class. Each matching declaration is a separate candidate with symbol handle, language, kind, name, qualified owner, signature, rendered path and declaration range (SR-025). Overloads and unrelated same-name types are never merged or reduced to a first match. Paged collection applies the result collection cap (SR-002): more results than the cap returns TOO_MANY_RESULTS with a narrowing hint and no page.",
+      "acceptance": [
+        "AC-005",
+        "AC-021",
+        "AC-025"
+      ]
+    },
+    {
+      "id": "SR-007",
+      "statement": "get_file_outline takes one file path and returns the catalog declarations (SR-006) of that file in source order, at any nesting depth, each with nesting depth (the number of enclosing catalog declarations, so 0 for top-level types), kind, name, signature, declaration range (SR-025) and symbol handle, in pages of at most 100 entries. It returns no statements or expression nodes. It never resolves types, so it needs no index. A non-Java file returns UNSUPPORTED_LANGUAGE, never an empty success. Paged collection applies the result collection cap (SR-002): more results than the cap returns TOO_MANY_RESULTS with a narrowing hint and no page.",
+      "acceptance": [
+        "AC-003",
+        "AC-007"
+      ]
+    },
+    {
+      "id": "SR-008",
+      "statement": "get_symbol_info takes a symbol handle and returns the symbol identity (kind, name, qualified owner, signature), declaration range (SR-025), the current document version, and either the declaration source with a new read handle for exactly that range, or SOURCE_TOO_LARGE with the declaration line count and UTF-8 byte size and no source and no read handle when the declaration exceeds 300 lines or 24 KiB.",
+      "acceptance": [
+        "AC-008"
+      ]
+    },
+    {
+      "id": "SR-011",
+      "statement": "Symbol handles are issued only by the adapter from IntelliJ resolution results of catalog operations. A handle is an opaque session-scoped identifier that encodes no PSI pointer, path, offset or source text. The adapter payload of a symbol handle holds the smart pointer plus language, qualified owner, signature, file identity and the document modification stamp observed at issue. Before issuing, the adapter compares the new pointer with live symbol entries using SmartPointerManager.pointToTheSameElement and returns the existing handle when one matches.",
+      "acceptance": [
+        "AC-011"
+      ]
+    },
+    {
+      "id": "SR-013",
+      "statement": "A read operation on a symbol handle re-resolves the stored smart pointer inside its read computation with documents committed. If the element no longer exists, or the restored element's kind, name or signature differs from the handle payload, it returns STALE_HANDLE. If the element still exists after document edits with the same kind, name and signature, the operation uses the element's current state and reports the current document version.",
+      "acceptance": [
+        "AC-013",
+        "AC-031"
+      ]
+    },
+    {
+      "id": "SR-018",
+      "statement": "Semantic operations support Java only. Symbol handles exist only for Java declarations of the SR-006 kinds, and search_symbols returns only Java declarations. get_file_outline on a non-Java file and search_symbols restricted to a non-Java file return UNSUPPORTED_LANGUAGE. find_references on a Java symbol includes resolved references from non-Java files (SR-009). read_file, find_file and search_text work for any text file.",
+      "acceptance": [
+        "AC-007",
+        "AC-031"
+      ]
+    },
+    {
+      "id": "SR-025",
+      "statement": "Identity terms. A declaration range is the text range of the declaration PSI element in the current document, including its doc comment, annotations and modifiers, reported as 0-based start and end-exclusive UTF-16 offsets plus 1-based start and end lines. A signature is computed from source text without type resolution: for a method or constructor, the name followed by the parameter type texts in parentheses, separated by ', '; for a field or enum constant, the name; for a type, its qualified name. A parameter type text is the text of the parameter type element with comments and annotations removed, whitespace runs collapsed to one space, one '[]' appended for each array dimension written after the parameter name, and varargs written as '...'. A compact canonical constructor uses the record component types in declaration order. A signature does not prove identity; the handle does. The qualified owner of a member or nested type is the qualified name of the containing type; of a top-level type, its package name (empty for the default package). The containing declaration of a reference is the innermost enclosing catalog declaration, reported as qualified owner plus signature.",
+      "acceptance": [
+        "AC-005",
+        "AC-008",
+        "AC-021"
+      ]
+    }
+  ],
+  "acceptance": [
+    {
+      "id": "AC-003",
+      "when": "Open a Java file in an editor and insert a new method with a unique name without saving, then call read_file, get_file_outline, search_symbols and get_symbol_info for it.",
+      "then": "All four report the new method from the unsaved text, with ranges that match the unsaved document and the unsaved document version.",
+      "target": "SemanticReadIdeTest#unsavedEditorContentWins"
+    },
+    {
+      "id": "AC-005",
+      "when": "Declare two overloads of one method name in one class, 'm(java.util.List<String> a)' and 'm(int... b)', and search_symbols for that name.",
+      "then": "Two distinct candidates with distinct handles are returned in SR-024 order with signatures 'm(java.util.List<String>)' and 'm(int...)'; neither is chosen silently.",
+      "target": "SemanticReadIdeTest#overloadsAreDistinctCandidates"
+    },
+    {
+      "id": "AC-007",
+      "when": "Call get_file_outline on a Java file with nested classes, on a Java file with 101 catalog declarations, and on a non-Java text file, and call search_symbols restricted to the non-Java file.",
+      "then": "The Java outline lists only declarations in source order with handles, and each nesting depth equals the number of enclosing catalog declarations; the 101-declaration file returns a page of 100 entries with a next-page token and then a complete page of 1; the non-Java outline and the restricted search return UNSUPPORTED_LANGUAGE with a hint that names read_file and search_text and no other tool, never an empty success; no handle is issued for the non-Java file.",
+      "target": "SemanticReadIdeTest#outlineIsJavaDeclarationsOnly"
+    },
+    {
+      "id": "AC-008",
+      "when": "Call get_symbol_info on the handle of a method that has a Javadoc comment and an annotation and is preceded in the file by a line containing a non-BMP character; then call it on a method longer than 300 lines.",
+      "then": "The first result has identity, a range that starts at the doc comment in UTF-16 offsets with 1-based lines, bounded source, current document version and a read handle whose range equals the returned range; the second returns SOURCE_TOO_LARGE with line count and byte size and no source and no read handle.",
+      "target": "SemanticReadIdeTest#symbolInfoReturnsReadHandleForReturnedRange"
+    },
+    {
+      "id": "AC-011",
+      "when": "Return the same element from search_symbols and get_file_outline, then submit a handle string that the registry never issued.",
+      "then": "Both operations return the same handle; the unissued handle returns STALE_HANDLE with a hint that names only catalog tools.",
+      "target": "SemanticReadIdeTest#handlesAreRegistryIssuedAndReused"
+    },
+    {
+      "id": "AC-013",
+      "when": "Obtain a method handle, edit the document above the method and inside its body, call get_symbol_info; replace the whole method text with a method of another name at the same position and call get_symbol_info; obtain a second method handle, delete that method and call get_symbol_info again.",
+      "then": "After the edits above and inside the body the result reports the moved range, the current body and the new document version; after the replacement by another name and after deletion the result is STALE_HANDLE.",
+      "target": "SemanticReadIdeTest#editedHandleReResolvesAndDeletedHandleIsStale"
+    },
+    {
+      "id": "AC-021",
+      "when": "In a Java file with a top-level class holding two explicit constructors, a nested class, a method m(String a[]), a field, a local class with a method, an anonymous class with a method and an initializer, plus an annotation type, an enum with constants one of which has a body with a method, and a record with a compact canonical constructor, call search_symbols with an empty name restricted to the file and restricted to the top-level class handle, and with the class name unrestricted. Also call search_symbols with an empty name restricted to a generated source file, restricted to a library class handle with scope PROJECT, and restricted to the handle of method m. With the result collection cap injected as 3, call search_symbols with an empty name restricted to the file.",
+      "then": "The file restriction lists every catalog declaration at every depth, including the annotation type, the enum constants and the compact constructor with the record component types as signature; the class restriction lists only its two constructors, nested class, method and field; m has signature 'm(String[])'; local classes, anonymous classes, their methods, the enum-constant body method and initializers are absent; the unrestricted class-name query returns the class and its two constructors as separate candidates; the generated file restriction and the library class restriction list their declarations; the method handle restriction returns NOT_A_TYPE. The capped restricted query returns TOO_MANY_RESULTS with no page.",
+      "target": "SemanticReadIdeTest#restrictedSymbolListingUsesCatalogKinds"
+    },
+    {
+      "id": "AC-025",
+      "when": "Attach a library with a sources jar and a second library without sources. Call search_symbols for a class of each library with PROJECT and LIBRARIES scope, then call get_symbol_info on the handle of the library-with-sources class.",
+      "then": "PROJECT returns no library candidate; LIBRARIES returns the class from the sources jar with its jar URL path and origin LIBRARY and returns no candidate for the class without sources; get_symbol_info returns the declaration source from the sources jar.",
+      "target": "SemanticReadIdeTest#librarySymbolsUseAttachedSources"
+    },
+    {
+      "id": "AC-031",
+      "when": "In dumb mode with the index wait bound injected as 200 ms, call get_symbol_info with an unissued handle, get_symbol_info with a read handle identifier, and search_symbols restricted to a Kotlin file.",
+      "then": "The handle calls return STALE_HANDLE and the Kotlin call returns UNSUPPORTED_LANGUAGE, all before 200 ms elapse.",
+      "target": "SemanticReadIdeTest#symbolPrecedenceSkipsIndexWait"
+    }
+  ],
+  "type_safety_audit": [
+    {
+      "requirement": "SR-006",
+      "invalid": "One candidate chosen for an ambiguous name, merged overloads, an unrestricted wildcard listing, a non-catalog declaration kind, a candidate without a qualified owner, or an owner restriction on a non-type",
+      "type_api_prevention": "Candidate list type with one entry per resolved declaration; declaration kind enum limited to the catalog kinds; qualified owner is a required component; wildcard argument factory requires a restriction; sealed outcome with a NOT_A_TYPE variant",
+      "residual_runtime_obligation": "Adapter enumerates every declaration the name index returns within scope and page, searches library sources with library sources included, omits declarations inside local classes, anonymous classes and enum-constant bodies, and checks the owner handle element kind",
+      "justification": "Declaration sets depend on the live index"
+    },
+    {
+      "requirement": "SR-007",
+      "invalid": "A raw AST dump, or an empty outline for an unsupported language",
+      "type_api_prevention": "Outline entry type limited to declaration kinds; sealed outcome with UNSUPPORTED_LANGUAGE variant",
+      "residual_runtime_obligation": "Adapter walks Java PSI declarations in a background read action without resolving types",
+      "justification": "Language support is determined by the file type at runtime"
+    },
+    {
+      "requirement": "SR-008",
+      "invalid": "Symbol information built from model-supplied text instead of a handle",
+      "type_api_prevention": "Operation argument is a symbol handle value only; sealed outcome with a source variant that carries the read handle for exactly the returned range and a SourceTooLarge variant without source or handle",
+      "residual_runtime_obligation": "Adapter re-resolves the handle before reading",
+      "justification": "Identity must come from IntelliJ resolution (I5)"
+    },
+    {
+      "requirement": "SR-011",
+      "invalid": "A model-forged or content-derived handle, or two live handles for one element",
+      "type_api_prevention": "Handle identifier constructible only by the registry; the registry offers issue-or-reuse with an adapter-supplied match predicate and never compares payloads itself",
+      "residual_runtime_obligation": "Adapter compares a new smart pointer with live payload pointers using pointToTheSameElement before issuing",
+      "justification": "Java cannot prevent a model from echoing arbitrary strings; resolution must reject them"
+    },
+    {
+      "requirement": "SR-013",
+      "invalid": "A read that reports a deleted element, a replacement declaration as the handle's element, or pre-edit ranges for an edited document",
+      "type_api_prevention": "Sealed resolution outcome with live and stale variants",
+      "residual_runtime_obligation": "Adapter reads pointer and document version in one read action and compares the restored element's kind, name and signature with the handle payload",
+      "justification": "Pointer survival after reparse is platform behavior"
+    },
+    {
+      "requirement": "SR-018",
+      "invalid": "A symbol handle issued for a non-Java PSI element",
+      "type_api_prevention": "Adapter-only handle factory that accepts only Java declarations of catalog kinds; UNSUPPORTED_LANGUAGE variant in outline and restricted symbol search outcomes",
+      "residual_runtime_obligation": "Adapter checks the file language before semantic access",
+      "justification": "QUALIFICATION_TARGET limits qualification to Java"
+    },
+    {
+      "requirement": "SR-025",
+      "invalid": "A range that omits the doc comment, a line/column range in another unit, or a signature that depends on type resolution",
+      "type_api_prevention": "Declaration range value with validated UTF-16 offsets and 1-based lines; signature value built by one adapter function from source text",
+      "residual_runtime_obligation": "Adapter reads element text ranges from committed PSI and converts offsets to lines on the same document",
+      "justification": "Later mutation features depend on the exact range; outlines must work without indexes"
+    }
+  ],
+  "audit_dimensions": [
+    "sum types",
+    "state payloads",
+    "validated values",
+    "constructor authority",
+    "transitions",
+    "argument/result correlation",
+    "collection invariants",
+    "aliasing/ownership",
+    "protocol progression",
+    "visibility",
+    "nullness"
+  ],
+  "non_goals": [
+    "Wire JSON argument parsing, tool schemas, tool descriptions, the LLM status/code/content envelope and ToolOutcome content rendering",
+    "Mutations, handle invalidation on agent edits, formatting, diagnostics, build and test execution",
+    "Regex search, case-insensitive search, glob file patterns and whole-project unscoped text search",
+    "Semantic support or parity claims for languages other than Java",
+    "Session owner wiring, New Session UI and tool-window content lifetime integration beyond a registry dispose operation",
+    "Persisting handles, page tokens or read results across sessions",
+    "MCP, HTTP, idea-facade or any second index beside IntelliJ",
+    "Changing CAP-LIFECYCLE-ADMISSION or CAP-DOMAIN-RUN-DRIVER declarations or semantics",
+    "Requirements, operations and acceptance owned by the other semantic reads slices"
+  ],
+  "assumptions": [
+    "Requirement IDs are unique across the five semantic reads slices, which replace CAP-SEMANTIC-READS. A reference to a requirement outside this spec names the slice that owns it: read-domain SR-001, SR-002, SR-012, SR-014, SR-021, SR-022, SR-023, SR-024; read-pipeline SR-003, SR-004, SR-005, SR-015, SR-016, SR-019, SR-020, SR-026; read-text-search SR-010, SR-017; read-symbols SR-006, SR-007, SR-008, SR-011, SR-013, SR-018, SR-025; read-references SR-009, SR-027.",
+    "IntelliJ JUnit 5 test fixtures for a Java project with editors, libraries, generated and excluded roots, dumb mode and a test reference query executor are available through the IntelliJ Platform Gradle test framework configuration; the design may change plugin-core/build.gradle.kts for this and must keep tests discoverable as @Test methods.",
+    "Smart pointers return no element after the element is deleted. After the element's text is replaced, restore by element info can bind to a replacement declaration at the same range (SmartPsiElementPointerImpl.java:90-115), so SR-013 compares the restored kind, name and signature with the handle payload.",
+    "The Structure View builder is not relied on for outlines because background use is not established; outlines walk Java PSI declarations in a background read action.",
+    "Normalizations of product terms: SR-025 range, signature, owner and containing-declaration definitions; SR-006 catalog declaration kinds; SR-003 line model and defaults; SR-004 path rendering and check order; SR-010 match and excerpt rule and skipped-file count; SR-020 READ_FAILED category rule; SR-026 failure precedence; SR-001 query validation; SR-004 canonical root comparison; SR-009 reference range, line and kind; SR-010 document offsets and match column; SR-025 parameter type text, array dimensions and compact constructors; SR-012 entry kinds.",
+    "Normalizations of scope: generated sources are omitted from find_file, unrestricted search_symbols and search_text directory scans, and included and marked in find_references so reference sets stay complete; handle reuse for the same element (SR-011) keeps one live handle per element in the registry.",
+    "Java short-name stub lookups hide library source files unless library sources are included (JavaSourceFilterScope.java:36-51). A project reference to a compiled library class or method is equivalent to the declaration in its attached source (PsiClassImplUtil.java:1162-1228,1251-1273), so find_references on a library source handle finds project references."
+  ],
+  "evidence": [
+    {
+      "id": "EV-SOURCE",
+      "kind": "source",
+      "description": "Split from CAP-SEMANTIC-READS revision 2 (spec digest 13183292b057ec708e01744089e3b3e82455cfc77112b3e5e54d82bad5687586) by owner decision 2026-09-15. Product authority (Tool catalog Reads and identity, I5, I6, I7, I10, I12, I13, QUALIFICATION_TARGET, SESSION_OWNER) and agent-cited reference ranges. IntelliJ: ReferencesSearch.java:123-166, IndexNotReadyException.java:47-80, NonBlockingReadAction.java:49-51, Query.kt:42, SmartPsiElementPointer.java:22-54, Document.java:183-192, FileViewProvider.java:143-149, FileDocumentManager.java:41-56, PsiShortNamesCache.java:64-144, FilenameIndex.java:79-158, ProjectFileIndex.java:160-224, ProjectScope.java:44-91, FindInProjectUtil.java:299-326, FindInProjectTask.java:366-423, LanguageStructureViewBuilder.java:25-34. Pi: coding-agent tools read.ts:14-166, truncate.ts:11-13, grep.ts:21-300, find.ts:26-284, agent-loop.ts:708-771. Reread line by line in specification review Round 1: QueryExecutorBase.java:57-66, PsiModificationTracker.java:56-60,99-106, PsiModificationTrackerImpl.java:47-61, DumbService.kt:110-125, NonBlockingReadAction.java:45-63, FileViewProvider.java:143-149, Query.kt:34-42, SmartPsiElementPointer.java:16-26, FindInProjectTask.java:395-403. Owner decisions 2026-09-15 Round 1: read cancellation, libraries scope, reference set, collection cap. Donor on master: ToolReadinessGate.java INDEX_WAIT_MS 30000 and permissive failure, SearchSymbolsTool.java:69-170. Reread through ij-search and pi-search answers in specification review Round 2: JavaSourceFilterScope.java:36-51, PsiClassImplUtil.java:1162-1228,1251-1273, SmartPsiElementPointerImpl.java:90-115, DumbServiceImpl.kt:335-342,373-383, NonBlockingReadActionImpl.java:639-641,696-704,808-814, PsiModificationTrackerImpl.java:47-56,99-106,120-127, PsiDocumentManagerBase.java:1149,1314, PsiVFSListener.java:34-39,139-148, FileDocumentManagerBase.java:73-80, GeneratedSourcesFilter.kt:29-44; Pi read.ts:136-156, grep.ts:25-41. Frozen dependency surfaces: RunSession.java:157-219, RunCancellation.java:27-45, NativeRunDriver.kt:156-199. Owner decisions 2026-09-15 Round 2: page token reuse, page staleness precedence, nested type members, libraries symbols, search restriction, admission refusal, disposed registry issue, restored pointer identity, write-action restarts, cancellation throwable, reference target identity, unsupported language hint."
+    },
+    {
+      "id": "EV-STRUCTURE",
+      "kind": "command",
+      "description": "Strict parse plus identity, reference, audit, matrix, null-boundary and stage-binding checks for CAP-READ-SYMBOLS."
+    },
+    {
+      "id": "EV-SPEC-REVIEW",
+      "kind": "review",
+      "description": "Fresh semantic review of the exact specification digest with zero unresolved blocking findings."
+    },
+    {
+      "id": "EV-DESIGN-SOURCE",
+      "kind": "source",
+      "description": "Frozen Java domain and adapter declarations installed once in production and mapped bidirectionally to requirements."
+    },
+    {
+      "id": "EV-DESIGN-COMPILE",
+      "kind": "command",
+      "description": "User-executed :plugin-core:classes result for the exact frozen declarations and build configuration."
+    },
+    {
+      "id": "EV-DESIGN-REVIEW",
+      "kind": "review",
+      "description": "Fresh two-direction semantic and type-safety review of the exact spec, design and declarations with zero unresolved blocking findings."
+    },
+    {
+      "id": "EV-RECEIPT",
+      "kind": "tool",
+      "description": "Exact-basis receipt binding feature, spec, design, declarations, configuration, evidence and status hashes, including direct-compile and Gradle log digests."
+    },
+    {
+      "id": "EV-IDE",
+      "kind": "command",
+      "description": "IntelliJ fixture tests for real IDE read operations, readiness, cancellation and unsaved content with nonzero discovered tests and passing counts."
+    },
+    {
+      "id": "EV-BUILD",
+      "kind": "command",
+      "description": "User-executed affected plugin-core build and buildPlugin results."
+    },
+    {
+      "id": "EV-IMPLEMENTATION-REVIEW",
+      "kind": "review",
+      "description": "Independent bounded review against the frozen surface with all Blockers and Majors resolved."
+    }
+  ],
+  "stages": [
+    {
+      "id": "S1",
+      "entry": [
+        {
+          "requirements": [
+            "SR-006",
+            "SR-007"
+          ],
+          "evidence": [
+            "EV-SOURCE"
+          ]
+        }
+      ],
+      "exit": [
+        {
+          "requirements": [
+            "SR-006",
+            "SR-007",
+            "SR-008",
+            "SR-011",
+            "SR-013",
+            "SR-018",
+            "SR-025"
+          ],
+          "evidence": [
+            "EV-STRUCTURE",
+            "EV-SPEC-REVIEW"
+          ]
+        }
+      ],
+      "outcome": "SPEC_VALID for the exact normalized feature basis; no design or implementation claim"
+    },
+    {
+      "id": "S2",
+      "depends_on": [
+        "S1"
+      ],
+      "entry": [
+        {
+          "requirements": [
+            "SR-006",
+            "SR-007"
+          ],
+          "evidence": [
+            "EV-STRUCTURE",
+            "EV-SPEC-REVIEW"
+          ]
+        }
+      ],
+      "exit": [
+        {
+          "requirements": [
+            "SR-006",
+            "SR-007",
+            "SR-008",
+            "SR-011",
+            "SR-013",
+            "SR-018",
+            "SR-025"
+          ],
+          "evidence": [
+            "EV-DESIGN-SOURCE",
+            "EV-DESIGN-COMPILE",
+            "EV-DESIGN-REVIEW",
+            "EV-RECEIPT"
+          ]
+        }
+      ],
+      "outcome": "DESIGN_VALID; implementation surface frozen"
+    },
+    {
+      "id": "S3",
+      "depends_on": [
+        "S2"
+      ],
+      "entry": [
+        {
+          "requirements": [
+            "SR-006",
+            "SR-007"
+          ],
+          "evidence": [
+            "EV-DESIGN-SOURCE",
+            "EV-DESIGN-COMPILE",
+            "EV-DESIGN-REVIEW",
+            "EV-RECEIPT"
+          ]
+        }
+      ],
+      "exit": [
+        {
+          "requirements": [
+            "SR-006",
+            "SR-007",
+            "SR-008",
+            "SR-011",
+            "SR-013",
+            "SR-018",
+            "SR-025"
+          ],
+          "evidence": [
+            "EV-IDE",
+            "EV-BUILD",
+            "EV-IMPLEMENTATION-REVIEW"
+          ]
+        }
+      ],
+      "outcome": "CAP-READ-SYMBOLS closure qualified"
+    }
+  ],
+  "open_decisions": [],
+  "operation_matrix": [
+    {
+      "operation": "get_file_outline",
+      "phase": "INDEXING",
+      "precondition": "more results than the collection cap",
+      "result": "TOO_MANY_RESULTS with narrowing hint; no page; no wait for indexing",
+      "next_phase": "INDEXING"
+    },
+    {
+      "operation": "get_file_outline|search_symbols restricted to a file",
+      "phase": "SMART|INDEXING",
+      "precondition": "file is not Java",
+      "result": "UNSUPPORTED_LANGUAGE; no wait for indexing",
+      "next_phase": "unchanged"
+    },
+    {
+      "operation": "get_symbol_info|find_references|search_symbols with an owner type handle",
+      "phase": "SMART|INDEXING",
+      "precondition": "handle unknown, evicted, wrong-kind or foreign",
+      "result": "STALE_HANDLE with catalog-only rediscovery hint; no wait for indexing",
+      "next_phase": "unchanged"
+    },
+    {
+      "operation": "get_symbol_info|find_references|search_symbols with an owner type handle",
+      "phase": "SMART",
+      "precondition": "handle issued by this registry and element exists with the same kind, name and signature",
+      "result": "Re-resolve; report current state and document version",
+      "next_phase": "SMART"
+    },
+    {
+      "operation": "get_symbol_info|find_references|search_symbols with an owner type handle",
+      "phase": "SMART",
+      "precondition": "handle issued by this registry and element deleted, or restored element differs in kind, name or signature",
+      "result": "STALE_HANDLE with catalog-only rediscovery hint",
+      "next_phase": "SMART"
+    },
+    {
+      "operation": "search_symbols with an owner type handle",
+      "phase": "SMART",
+      "precondition": "handle issued by this registry and element is not a class, interface, enum, record or annotation type",
+      "result": "NOT_A_TYPE",
+      "next_phase": "SMART"
+    }
+  ],
+  "receipt_identity": {
+    "fields": [
+      "stage",
+      "feature",
+      "spec_hash",
+      "design_hash",
+      "declaration_hashes",
+      "configuration_identity",
+      "evidence_input_hashes",
+      "evidence_hashes",
+      "status"
+    ],
+    "volatile_fields_excluded_from_digest": [
+      "timestamp"
+    ]
+  },
+  "null_boundary_matrix": [
+    {
+      "operation": "read adapter platform results",
+      "null_input": "nullable platform return such as missing document, file or resolved element",
+      "expected": "Named outcome (FILE_NOT_FOUND, UNSUPPORTED_FILE, STALE_HANDLE); never a null in a domain value"
+    }
+  ]
+}

@@ -368,6 +368,19 @@ Each milestone becomes a feature closure that passes SPEC_VALID and DESIGN_VALID
 | 7 | Cutover and subtraction | Native registrations only; remove unreachable donor runtime | Done early by owner decision (DONOR_SUBTRACTION). Remaining obligation: startup and plugin archive evidence that no donor runtime is registered or packaged. |
 | 3C | Command escape hatch | `run_command` | Only if dogfood proves it necessary. Flood bounded, Stop kills owned root and reports survivors, VFS refreshed after failing write, dirty-document conflict surfaced. |
 
+### Milestone slices
+
+Each milestone passes its gates as a sequence of slices of about 3–8 requirements, one `workflow.md` feature directory each. A slice depends only on earlier slices. Pure domain slices come before IntelliJ adapter slices. Slices without a directory are planned boundaries, not specifications; each boundary is confirmed when its S1 draft starts.
+
+| Milestone | Slices in gate order |
+|---|---|
+| 2 Native semantic reads | R1 `read-domain` (arguments, bounds, registry, handles, outcomes, ordering) · R2 `read-pipeline` (admission, readiness, cancellation, failures, precedence, paths, `read_file`, `find_file`) · R3 `read-text-search` (`search_text`, paging) and R4 `read-symbols` (`search_symbols`, `get_file_outline`, `get_symbol_info`, handle identity), in either order · R5 `read-references` (`find_references`, milestone prefix test) |
+| Codec (no milestone row yet; required before 4 live integration) | Tool schemas and argument parsing into typed read and mutation arguments · LLM status/code/content envelope and outcome rendering into `ToolOutcome` content |
+| 3A Semantic mutation | Mutation admission and `edit_text` · `write_file` · `replace_symbol_body` · rename refactor · handle invalidation on edits and mutation prefix test |
+| 3B Verification | Run-owned formatting flush · `get_problems` diagnostics · `build_project` and `run_tests` |
+| 4 Codex auth/transport | SSE decoder and Responses transport with fake HTTP · OAuth PKCE and PasswordSafe credential owner · manual live smoke |
+| 5 Native UI | Session owner and content lifetime (New Session, registry disposal) · transcript and composer streaming · trust opt-in, login and model controls |
+
 After shared contracts freeze, tools and provider work can run in parallel with one integration owner for shared APIs, build files, `plugin.xml` and commits. Sibling workers skip builds while edits are concurrent; the integration owner validates after the wave settles. Persistence, providers and other expansion wait until after subtraction.
 
 ## Dogfood gate
