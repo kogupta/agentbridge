@@ -6,7 +6,7 @@ Append-only. Review rounds are tied to exact content digests. Acceptance targets
 
 - Workflow state: SPEC_DRAFT; S1 structure check PASS; fresh review not run
 - Latest round: 0
-- Spec digest: `7375e477d1ce23fee70a33f3cd111722aa60ae5c37d523187226b5473ff36f93`
+- Spec digest: `285e99ae5022c58b2a390f676120c7b5d50f5dca0a84c0cf854f5515ce0c88c7` (changed by read-domain revision 1)
 - Product digest at spec basis: `2edba8b1e45db4f53d2f2dad7ba290a0067f5287a30244f2e6bdad80e7c05bae` (Milestone slices section added with this split)
 - Open Blockers: none recorded
 - Open Majors: none recorded
@@ -24,3 +24,13 @@ Append-only. Review rounds are tied to exact content digests. Acceptance targets
 - Local decisions are owned by exactly one slice; other slices reference them as `REF:<slice>/spec.json#<key>`
 - Mechanical command: `python3 scripts/native-spec/check_slice.py check --spec native-agent-docs/read-symbols/spec.json --planned-targets`; result PASS, zero findings
 - Verdict: none; review pending
+
+## Change — clauses moved by read-domain revision 1
+
+- Cause: read-domain specification review Round 1 and owner decisions 2026-09-15; see `read-domain/review.md` Revision 1
+- Spec digest before: `7375e477d1ce23fee70a33f3cd111722aa60ae5c37d523187226b5473ff36f93`; after: `285e99ae5022c58b2a390f676120c7b5d50f5dca0a84c0cf854f5515ce0c88c7`
+- Decision REF `read_handle_issue` added; SR-008 issues a new read handle on every call; AC-008 repeats get_symbol_info
+- SR-011 names registry issue-or-reuse and smart pointer release with SmartPointerManager.removePointer, moved from read-domain SR-023; AC-011 checks the pointer count after disposal
+- Requirement ownership map in assumption 1 adds read-pipeline SR-028
+- Mechanical command: `python3 scripts/native-spec/check_slice.py check --spec native-agent-docs/read-symbols/spec.json --planned-targets`; result PASS, zero findings
+- Not a review receipt; review still pending

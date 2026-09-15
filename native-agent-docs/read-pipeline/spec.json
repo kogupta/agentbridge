@@ -31,12 +31,13 @@
     "write_action_restarts": "UNBOUNDED_UNTIL_STOP",
     "cancellation_throwable": "JAVA_UTIL_CONCURRENT_CANCELLATION_EXCEPTION",
     "reference_target_identity": "REF:read-references/spec.json#reference_target_identity",
-    "unsupported_language_hint": "REF:read-symbols/spec.json#unsupported_language_hint"
+    "unsupported_language_hint": "REF:read-symbols/spec.json#unsupported_language_hint",
+    "read_handle_issue": "NEW_READ_HANDLE_PER_CALL"
   },
   "requirements": [
     {
       "id": "SR-003",
-      "statement": "read_file takes a path, an optional 1-based start line (default 1) and an optional 1-based inclusive end line (default start plus 99). An end before start, or a span above 300 lines, is an argument rejection. Lines are the lines of the current document text with LF terminators; a final LF does not start another line, and an empty document has zero lines. The range is clipped at end of file and the actual range is returned. A start line after the last line, including any start in an empty document, returns RANGE_OUT_OF_BOUNDS with the line count. The 24 KiB cap counts the UTF-8 bytes of the returned lines including their LF terminators. When the cap cuts the range, the result holds the largest whole-line prefix, its actual range and a truncated flag. When the start line alone exceeds 24 KiB, the result is LINE_EXCEEDS_BYTE_CAP with that line's byte size. A binary file, or a file the platform does not load as text content, returns UNSUPPORTED_FILE. A successful read returns a read handle.",
+      "statement": "read_file takes a path, an optional 1-based start line (default 1) and an optional 1-based inclusive end line (default start plus 99). An end before start, or a span above 300 lines, is an argument rejection. Lines are the lines of the current document text with LF terminators; a final LF does not start another line, and an empty document has zero lines. The range is clipped at end of file and the actual range is returned. A start line after the last line, including any start in an empty document, returns RANGE_OUT_OF_BOUNDS with the line count. The 24 KiB cap counts the UTF-8 bytes of the returned lines including their LF terminators. When the cap cuts the range, the result holds the largest whole-line prefix, its actual range and a truncated flag. When the start line alone exceeds 24 KiB, the result is LINE_EXCEEDS_BYTE_CAP with that line's byte size. A binary file, or a file the platform does not load as text content, returns UNSUPPORTED_FILE. A successful read returns a new read handle (SR-014) on every call; read handles are never reused.",
       "acceptance": [
         "AC-002"
       ]
@@ -59,7 +60,7 @@
     },
     {
       "id": "SR-015",
-      "statement": "Current editor content is authoritative. Every operation computes its result inside one read computation that runs only when all documents are committed (the platform documents-committed constraint), so every returned text and range comes from the current document including unsaved changes, and every PSI range matches the reported document version. The document version is the document modification stamp.",
+      "statement": "Current editor content is authoritative. Every operation computes its result inside one read computation that runs only when all documents are committed (the platform documents-committed constraint), so every returned text and range comes from the current document including unsaved changes, and every PSI range matches the reported document version. The document version is the document modification stamp. Two calls with equal arguments, with no project change and no registry disposal between them and with every input handle and page token still live, return equal outcomes, except for the identifiers of newly issued read handles and page tokens.",
       "acceptance": [
         "AC-030"
       ]
@@ -91,6 +92,13 @@
       "statement": "Failure precedence for one admitted read, first applicable wins: (1) cancellation, including a disposed registry at registration (SR-019); (2) PROJECT_UNAVAILABLE; (3) registry lookup of an input symbol handle, including an owner type handle (STALE_HANDLE), then of an input page token, including a different operation or argument set (STALE_PAGE), then the PSI modification count of the token (STALE_PAGE), all without waiting for indexing; (4) path outcomes in SR-004 order; (5) file-type and language outcomes (UNSUPPORTED_FILE, UNSUPPORTED_LANGUAGE), without waiting for indexing; (6) INDEX_NOT_READY for index-backed operations; (7) re-resolution STALE_HANDLE (SR-013), then NOT_A_TYPE (SR-006), then PSI modification count STALE_PAGE inside the operation computation (SR-017); (8) TOO_MANY_RESULTS; (9) the operation result, including RANGE_OUT_OF_BOUNDS, LINE_EXCEEDS_BYTE_CAP and SOURCE_TOO_LARGE. An unexpected platform failure at steps 2 to 9 returns READ_FAILED. Argument rejection (SR-001) happens before admission. The read pipeline has all nine steps from this slice on; steps whose outcomes belong to later slices (STALE_HANDLE and NOT_A_TYPE in read-symbols, STALE_PAGE in read-text-search) stay in their positions and are bound by those slices without a change to this order.",
       "acceptance": [
         "AC-024"
+      ]
+    },
+    {
+      "id": "SR-028",
+      "statement": "Read adapters hold every IntelliJ type that reads use, including smart pointers inside registry payloads; read domain values hold none (SR-021). The read execution path uses no MCP, HTTP or runtime reflection.",
+      "acceptance": [
+        "AC-036"
       ]
     }
   ],
@@ -133,9 +141,15 @@
     },
     {
       "id": "AC-030",
-      "when": "Open a text file in an editor and change one line without saving, then call read_file for that line and find_file for the file name.",
-      "then": "read_file returns the unsaved line text and the unsaved document version; find_file returns the file.",
+      "when": "Open a text file in an editor and change one line without saving, then call read_file for that line and find_file for the file name, then call read_file for that line and find_file for the file name once more without a change.",
+      "then": "read_file returns the unsaved line text and the unsaved document version; find_file returns the file; the repeated read_file outcome equals the first except for a distinct read handle identifier, and the repeated find_file outcome equals the first.",
       "target": "SemanticReadIdeTest#unsavedEditorContentWinsForFileReads"
+    },
+    {
+      "id": "AC-036",
+      "when": "Discover every class file in the compiled read adapter packages and read the constant pool of each.",
+      "then": "At least one class is found, and the set contains every read adapter class that the design declares; no constant pool references an MCP SDK type, java/net/http/, com/sun/net/httpserver/ or java/lang/reflect/.",
+      "target": "ReadAdapterArchitectureTest#adaptersUseNoMcpHttpOrReflection"
     }
   ],
   "type_safety_audit": [
@@ -194,6 +208,13 @@
       "type_api_prevention": "One adapter pipeline with ordered stages, each returning a sealed stage outcome that short-circuits",
       "residual_runtime_obligation": "Adapter maps unexpected platform failures to READ_FAILED at each stage",
       "justification": "Deterministic outcomes are a workflow principle; the model must receive the same failure for the same state"
+    },
+    {
+      "requirement": "SR-028",
+      "invalid": "An IntelliJ type in a read domain value, or an MCP, HTTP or reflection hop on the read path",
+      "type_api_prevention": "Separate read domain and adapter packages; the registry is generic over the adapter payload type",
+      "residual_runtime_obligation": "Architecture test over compiled read adapter classes",
+      "justification": "Build dependencies and later edits can break layering (product I1)"
     }
   ],
   "audit_dimensions": [
@@ -221,7 +242,7 @@
     "Requirements, operations and acceptance owned by the other semantic reads slices"
   ],
   "assumptions": [
-    "Requirement IDs are unique across the five semantic reads slices, which replace CAP-SEMANTIC-READS. A reference to a requirement outside this spec names the slice that owns it: read-domain SR-001, SR-002, SR-012, SR-014, SR-021, SR-022, SR-023, SR-024; read-pipeline SR-003, SR-004, SR-005, SR-015, SR-016, SR-019, SR-020, SR-026; read-text-search SR-010, SR-017; read-symbols SR-006, SR-007, SR-008, SR-011, SR-013, SR-018, SR-025; read-references SR-009, SR-027.",
+    "Requirement IDs are unique across the five semantic reads slices, which replace CAP-SEMANTIC-READS. A reference to a requirement outside this spec names the slice that owns it: read-domain SR-001, SR-002, SR-012, SR-014, SR-021, SR-022, SR-023, SR-024; read-pipeline SR-003, SR-004, SR-005, SR-015, SR-016, SR-019, SR-020, SR-026, SR-028; read-text-search SR-010, SR-017; read-symbols SR-006, SR-007, SR-008, SR-011, SR-013, SR-018, SR-025; read-references SR-009, SR-027.",
     "CAP-LIFECYCLE-ADMISSION is frozen with FINAL_GATE_PASS; its S3 is blocked only on EV-SURFACE. This feature relies on its admission semantics, and this feature's S3 cannot close while lifecycle S3 remains blocked.",
     "CAP-DOMAIN-RUN-DRIVER is closed; reads bind to its PlannedCall.ToolOperation, ToolRunner and CallAdmission surfaces without changing them.",
     "A read cancelled after admission, or finding a disposed registry at registration, throws java.util.concurrent.CancellationException from the Effect; the frozen driver maps it to ToolOutcome.FailedAfterStart with the message 'Tool execution failed after admission: CancellationException' and no touched paths (NativeRunDriver.executeOne). The frozen driver acts on the ToolRunner's returned NotStarted reason for refused admission (NativeRunDriver.kt:156-179), so the codec maps the NotAdmitted read result as SR-019 states. The codec feature renders expected read outcomes into ToolOutcome content and cannot change lifecycle accounting.",
@@ -238,7 +259,7 @@
     {
       "id": "EV-SOURCE",
       "kind": "source",
-      "description": "Split from CAP-SEMANTIC-READS revision 2 (spec digest 13183292b057ec708e01744089e3b3e82455cfc77112b3e5e54d82bad5687586) by owner decision 2026-09-15. Product authority (Tool catalog Reads and identity, I5, I6, I7, I10, I12, I13, QUALIFICATION_TARGET, SESSION_OWNER) and agent-cited reference ranges. IntelliJ: ReferencesSearch.java:123-166, IndexNotReadyException.java:47-80, NonBlockingReadAction.java:49-51, Query.kt:42, SmartPsiElementPointer.java:22-54, Document.java:183-192, FileViewProvider.java:143-149, FileDocumentManager.java:41-56, PsiShortNamesCache.java:64-144, FilenameIndex.java:79-158, ProjectFileIndex.java:160-224, ProjectScope.java:44-91, FindInProjectUtil.java:299-326, FindInProjectTask.java:366-423, LanguageStructureViewBuilder.java:25-34. Pi: coding-agent tools read.ts:14-166, truncate.ts:11-13, grep.ts:21-300, find.ts:26-284, agent-loop.ts:708-771. Reread line by line in specification review Round 1: QueryExecutorBase.java:57-66, PsiModificationTracker.java:56-60,99-106, PsiModificationTrackerImpl.java:47-61, DumbService.kt:110-125, NonBlockingReadAction.java:45-63, FileViewProvider.java:143-149, Query.kt:34-42, SmartPsiElementPointer.java:16-26, FindInProjectTask.java:395-403. Owner decisions 2026-09-15 Round 1: read cancellation, libraries scope, reference set, collection cap. Donor on master: ToolReadinessGate.java INDEX_WAIT_MS 30000 and permissive failure, SearchSymbolsTool.java:69-170. Reread through ij-search and pi-search answers in specification review Round 2: JavaSourceFilterScope.java:36-51, PsiClassImplUtil.java:1162-1228,1251-1273, SmartPsiElementPointerImpl.java:90-115, DumbServiceImpl.kt:335-342,373-383, NonBlockingReadActionImpl.java:639-641,696-704,808-814, PsiModificationTrackerImpl.java:47-56,99-106,120-127, PsiDocumentManagerBase.java:1149,1314, PsiVFSListener.java:34-39,139-148, FileDocumentManagerBase.java:73-80, GeneratedSourcesFilter.kt:29-44; Pi read.ts:136-156, grep.ts:25-41. Frozen dependency surfaces: RunSession.java:157-219, RunCancellation.java:27-45, NativeRunDriver.kt:156-199. Owner decisions 2026-09-15 Round 2: page token reuse, page staleness precedence, nested type members, libraries symbols, search restriction, admission refusal, disposed registry issue, restored pointer identity, write-action restarts, cancellation throwable, reference target identity, unsupported language hint."
+      "description": "Split from CAP-SEMANTIC-READS revision 2 (spec digest 13183292b057ec708e01744089e3b3e82455cfc77112b3e5e54d82bad5687586) by owner decision 2026-09-15. Product authority (Tool catalog Reads and identity, I5, I6, I7, I10, I12, I13, QUALIFICATION_TARGET, SESSION_OWNER) and agent-cited reference ranges. IntelliJ: ReferencesSearch.java:123-166, IndexNotReadyException.java:47-80, NonBlockingReadAction.java:49-51, Query.kt:42, SmartPsiElementPointer.java:22-54, Document.java:183-192, FileViewProvider.java:143-149, FileDocumentManager.java:41-56, PsiShortNamesCache.java:64-144, FilenameIndex.java:79-158, ProjectFileIndex.java:160-224, ProjectScope.java:44-91, FindInProjectUtil.java:299-326, FindInProjectTask.java:366-423, LanguageStructureViewBuilder.java:25-34. Pi: coding-agent tools read.ts:14-166, truncate.ts:11-13, grep.ts:21-300, find.ts:26-284, agent-loop.ts:708-771. Reread line by line in specification review Round 1: QueryExecutorBase.java:57-66, PsiModificationTracker.java:56-60,99-106, PsiModificationTrackerImpl.java:47-61, DumbService.kt:110-125, NonBlockingReadAction.java:45-63, FileViewProvider.java:143-149, Query.kt:34-42, SmartPsiElementPointer.java:16-26, FindInProjectTask.java:395-403. Owner decisions 2026-09-15 Round 1: read cancellation, libraries scope, reference set, collection cap. Donor on master: ToolReadinessGate.java INDEX_WAIT_MS 30000 and permissive failure, SearchSymbolsTool.java:69-170. Reread through ij-search and pi-search answers in specification review Round 2: JavaSourceFilterScope.java:36-51, PsiClassImplUtil.java:1162-1228,1251-1273, SmartPsiElementPointerImpl.java:90-115, DumbServiceImpl.kt:335-342,373-383, NonBlockingReadActionImpl.java:639-641,696-704,808-814, PsiModificationTrackerImpl.java:47-56,99-106,120-127, PsiDocumentManagerBase.java:1149,1314, PsiVFSListener.java:34-39,139-148, FileDocumentManagerBase.java:73-80, GeneratedSourcesFilter.kt:29-44; Pi read.ts:136-156, grep.ts:25-41. Frozen dependency surfaces: RunSession.java:157-219, RunCancellation.java:27-45, NativeRunDriver.kt:156-199. Owner decisions 2026-09-15 Round 2: page token reuse, page staleness precedence, nested type members, libraries symbols, search restriction, admission refusal, disposed registry issue, restored pointer identity, write-action restarts, cancellation throwable, reference target identity, unsupported language hint. Owner decision 2026-09-15 read-domain specification review Round 1: read_file issues a new read handle on every call; read determinism (from SR-024) and adapter layering (from SR-021) move to this slice."
     },
     {
       "id": "EV-STRUCTURE",
@@ -310,7 +331,8 @@
             "SR-016",
             "SR-019",
             "SR-020",
-            "SR-026"
+            "SR-026",
+            "SR-028"
           ],
           "evidence": [
             "EV-STRUCTURE",
@@ -347,7 +369,8 @@
             "SR-016",
             "SR-019",
             "SR-020",
-            "SR-026"
+            "SR-026",
+            "SR-028"
           ],
           "evidence": [
             "EV-DESIGN-SOURCE",
@@ -388,7 +411,8 @@
             "SR-016",
             "SR-019",
             "SR-020",
-            "SR-026"
+            "SR-026",
+            "SR-028"
           ],
           "evidence": [
             "EV-IDE",

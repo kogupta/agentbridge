@@ -1,4 +1,4 @@
-package com.github.catatafishen.agentbridge.nativeagent.run;
+package com.github.catatafishen.agentbridge.nativeagent.run.resources;
 
 import java.util.ArrayList;
 import java.util.List;

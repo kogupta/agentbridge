@@ -6,7 +6,7 @@ Append-only. Review rounds are tied to exact content digests. Acceptance targets
 
 - Workflow state: SPEC_DRAFT; S1 structure check PASS; fresh review not run
 - Latest round: 0
-- Spec digest: `3bd189e6fe9dcdcecb5ff8daff795d609aa7b16cbfa44d39a9a9feaf747d48bd`
+- Spec digest: `4bd9a8f7acdd8981dd2cd607e6684a85e00cac2924ebc8d851459e23b7c51040` (changed by read-domain revision 1)
 - Product digest at spec basis: `2edba8b1e45db4f53d2f2dad7ba290a0067f5287a30244f2e6bdad80e7c05bae` (Milestone slices section added with this split)
 - Open Blockers: none recorded
 - Open Majors: none recorded
@@ -24,3 +24,14 @@ Append-only. Review rounds are tied to exact content digests. Acceptance targets
 - Local decisions are owned by exactly one slice; other slices reference them as `REF:<slice>/spec.json#<key>`
 - Mechanical command: `python3 scripts/native-spec/check_slice.py check --spec native-agent-docs/read-pipeline/spec.json --planned-targets`; result PASS, zero findings
 - Verdict: none; review pending
+
+## Change — clauses moved by read-domain revision 1
+
+- Cause: read-domain specification review Round 1 and owner decisions 2026-09-15; see `read-domain/review.md` Revision 1
+- Spec digest before: `3bd189e6fe9dcdcecb5ff8daff795d609aa7b16cbfa44d39a9a9feaf747d48bd`; after: `4bd9a8f7acdd8981dd2cd607e6684a85e00cac2924ebc8d851459e23b7c51040`
+- Decision `read_handle_issue` added (owner decision): new read handle on every call; SR-003 states it
+- SR-015 adds the equal-outcome rule moved from read-domain SR-024; AC-030 repeats read_file and find_file
+- SR-028 and AC-036 added: adapter layering and no MCP, HTTP or reflection, moved from read-domain SR-021; audit row and stage bindings added
+- Requirement ownership map in assumption 1 adds read-pipeline SR-028
+- Mechanical command: `python3 scripts/native-spec/check_slice.py check --spec native-agent-docs/read-pipeline/spec.json --planned-targets`; result PASS, zero findings
+- Not a review receipt; review still pending

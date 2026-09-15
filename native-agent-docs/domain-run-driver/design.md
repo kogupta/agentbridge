@@ -4,7 +4,7 @@
 
 Design draft for `CAP-DOMAIN-RUN-DRIVER`. Canonical behavior is `spec.json`. The only lifecycle authority is the frozen `nativeagent.lifecycle.RunLifecycle`; this feature composes it and does not restate or fork its state machine.
 
-The Java package is `com.github.catatafishen.agentbridge.nativeagent.run`. Kotlin uses the same package so internal driver ports can consume package-private Java capabilities without widening the public plugin API.
+The run domain is split into focused packages under `com.github.catatafishen.agentbridge.nativeagent.run`: `session` owns the conversation and call-admission model, `cache` owns prompt-cache state, `policy` owns retry and run-limit policy, `resources` owns cancellation/resource/time capabilities, and `driver` owns the Kotlin coroutine driver and its internal ports. Kotlin driver ports therefore import the Java domain explicitly; package-private Java capabilities remain within their owning package and are not widened merely to support the move. The cache-prefix integration test remains in the `cache` test package because it intentionally exercises package-private request construction.
 
 ## Ownership
 
@@ -18,7 +18,7 @@ The Java package is `com.github.catatafishen.agentbridge.nativeagent.run`. Kotli
 
 ## Java surface
 
-Production declarations are installed once under `plugin-core/src/main/java/com/github/catatafishen/agentbridge/nativeagent/run/`.
+Production declarations are installed once under `plugin-core/src/main/java/com/github/catatafishen/agentbridge/nativeagent/run/{session,cache,policy,resources}/`.
 
 | Declaration | Frozen role |
 |---|---|
@@ -92,7 +92,7 @@ Structural reuse is total common-prefix bytes divided by total previous-request 
 
 ## Kotlin surface
 
-Production declarations are under `plugin-core/src/main/kotlin/com/github/catatafishen/agentbridge/nativeagent/run/`.
+Production declarations are under `plugin-core/src/main/kotlin/com/github/catatafishen/agentbridge/nativeagent/run/driver/`.
 
 ```text
 internal fun interface ProviderTransport {

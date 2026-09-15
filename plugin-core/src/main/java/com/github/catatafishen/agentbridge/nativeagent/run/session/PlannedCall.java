@@ -1,4 +1,4 @@
-package com.github.catatafishen.agentbridge.nativeagent.run;
+package com.github.catatafishen.agentbridge.nativeagent.run.session;
 
 import com.github.catatafishen.agentbridge.nativeagent.lifecycle.Call;
 

@@ -1,4 +1,4 @@
-package com.github.catatafishen.agentbridge.nativeagent.run;
+package com.github.catatafishen.agentbridge.nativeagent.run.session;
 
 import java.util.Objects;
 

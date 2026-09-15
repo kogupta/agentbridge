@@ -1,4 +1,4 @@
-package com.github.catatafishen.agentbridge.nativeagent.run;
+package com.github.catatafishen.agentbridge.nativeagent.run.policy;
 
 import java.time.Duration;
 import java.util.Objects;

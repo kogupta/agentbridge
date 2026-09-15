@@ -1,4 +1,4 @@
-package com.github.catatafishen.agentbridge.nativeagent.run;
+package com.github.catatafishen.agentbridge.nativeagent.run.cache;
 
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -8,6 +8,8 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalInt;
+import com.github.catatafishen.agentbridge.nativeagent.run.session.RunMessage;
+import com.github.catatafishen.agentbridge.nativeagent.run.session.RunSession;
 
 public final class CacheGeneration {
     private final Id id;
