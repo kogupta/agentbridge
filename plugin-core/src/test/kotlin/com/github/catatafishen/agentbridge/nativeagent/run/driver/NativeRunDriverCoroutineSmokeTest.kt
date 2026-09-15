@@ -86,12 +86,12 @@ class NativeRunDriverCoroutineSmokeTest {
                 is CallAdmission.Result.Rejected -> ToolOutcome.NotStarted(ToolOutcome.Reason.CANCELLED_NOT_STARTED, "stopped")
             }
         }
-        NativeRunDriver(scope, session, transport, tools, FakeClock(), cache(), renderer())
-            .submit(RunMessage.User("request"))
+        val driver = NativeRunDriver(scope, session, transport, tools, FakeClock(), cache(), renderer())
+        driver.submit(RunMessage.User("request"))
         assertTrue(entered.await(5, TimeUnit.SECONDS))
         parent.cancel()
         release.countDown()
-        awaitPhase(session, RunSession.Phase.IDLE)
+        driver.awaitCompletion()
         val result = session.history().messages().filterIsInstance<RunMessage.ToolResult>().single()
         assertInstanceOf(ToolOutcome.Completed::class.java, result.outcome())
         assertFalse(parent.children.iterator().hasNext())

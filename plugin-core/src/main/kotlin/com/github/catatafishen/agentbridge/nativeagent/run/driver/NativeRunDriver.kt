@@ -62,6 +62,15 @@ internal class NativeRunDriver(
         session.dispose()
         active.get()?.job?.cancel(CancellationException("Session disposed"))
     }
+    /**
+     * Suspends until the currently submitted run has left the parent scope.
+     *
+     * Lifecycle phase settlement and coroutine completion are separate events;
+     * callers that own the parent scope can use this hook to await both.
+     */
+    internal suspend fun awaitCompletion() {
+        active.get()?.job?.join()
+    }
 
     private suspend fun drive(activeRun: Active) {
         activeRun.started = true
