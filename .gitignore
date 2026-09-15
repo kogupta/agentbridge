@@ -107,3 +107,10 @@ fixtures/dotnet/.idea/.idea.dotnet/
 .mcp.json
 .omp/
 .zcode/
+
+# Dev-only semantic-reads tracker ledger (never product state)
+tracker/ledger.sqlite*
+
+# Python bytecode
+__pycache__/
+*.pyc

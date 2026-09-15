@@ -1,0 +1,3 @@
+-- expect-pending: command-layer rule — `binding set ... NEW` without absence evidence aborts.
+-- The verdict-specific evidence rule lives in the binding command layer (plan Phase 3);
+-- this fixture activates when that command lands.
