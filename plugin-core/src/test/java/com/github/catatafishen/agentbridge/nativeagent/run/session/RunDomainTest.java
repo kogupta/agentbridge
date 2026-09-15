@@ -110,6 +110,33 @@ class RunDomainTest {
     }
 
     @Test
+    void disposeCancelsAndDrainsPendingCallsInOrder() {
+        RunSession session = new RunSession();
+        RunSession.ActiveRun run = started(session);
+        PlannedCall.Executable first = executable("a");
+        PlannedCall.Executable second = executable("b");
+        session.acceptTurn(run, new ValidatedAssistantTurn.Complete(
+            assistant("", RunMessage.Completion.COMPLETE, List.of(first, second))));
+        assertInstanceOf(RunSession.CallStep.Execute.class, session.nextCall(run));
+
+        session.dispose();
+        assertEquals(RunSession.Phase.STOPPING, session.phase());
+        List<RunMessage> messages = session.history().messages();
+        assertEquals(4, messages.size(), "dispose records one cancelled result per pending call");
+        RunMessage.ToolResult firstResult = (RunMessage.ToolResult) messages.get(2);
+        assertEquals(first.id(), firstResult.callId());
+        assertEquals(ToolOutcome.Reason.CANCELLED_NOT_STARTED,
+            ((ToolOutcome.NotStarted) firstResult.outcome()).reason());
+        RunMessage.ToolResult secondResult = (RunMessage.ToolResult) messages.get(3);
+        assertEquals(second.id(), secondResult.callId());
+        assertEquals(ToolOutcome.Reason.CANCELLED_NOT_STARTED,
+            ((ToolOutcome.NotStarted) secondResult.outcome()).reason());
+
+        assertInstanceOf(RunSession.FinishResult.Finished.class, session.finish(run));
+        assertEquals(RunSession.Phase.DISPOSED, session.phase());
+    }
+
+    @Test
     void runLimitsPermitBoundaryAndRejectNextWork() {
         RunLimits limits = new RunLimits(2, 2, Duration.ofMinutes(1));
         RunLimits.Budget budget = new RunLimits.Budget(limits, START);

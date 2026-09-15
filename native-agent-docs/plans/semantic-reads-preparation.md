@@ -151,12 +151,12 @@ Finite bounds (Quint constants, recorded in evidence `params`):
 | Constant | Value |
 |---|---|
 | `MAX_TURNS` | 2 accepted provider responses per run (`RunLimits`) |
-| `MAX_CALLS` | 2 calls per batch (`BATCHES`: `(1,0)`, `(2,0)`, `(1,2)`, `(2,1)`) |
+| `MAX_CALLS` | 3 calls per batch (fixed slots `slot0`–`slot2`; `BATCHES` enumerates the ascending-ID subsets of `{1,2,3}`) |
 | Retries | 1 per request (`retried`, `RetryPolicy`) |
 | `MAX_RUNS` | 2 |
 | `MAX_GENERATIONS` | 2 |
 | `INDEX_BOUND` | 2 abstract ticks |
-| `MAX_RESTARTS` | 2 write-action restarts per read |
+| `MAX_RESTARTS` | 3 write-action restarts per read |
 | `MAX_EDITS` | 2 document edits per read |
 | `MAX_DUMB` | 2 dumb-mode entries per read |
 
@@ -169,13 +169,13 @@ Coarse actions:
 | `limitStop` | Driver | as `beginRequest`, but turns at `MAX_TURNS` | stop (budget not admitted) |
 | `providerAttempt(outcome, ids)` | Provider | request in flight | after stop: request ends. `TERMINAL_TEXT` or `TERMINAL_CALLS`: turn held. First `RETRYABLE`: retry. Second `RETRYABLE` or `FAILED`: stop. |
 | `deliverProvisional` | Provider | `REQUESTING`, request in flight, not disposed | provisional text delivered |
-| `acceptTurn` | Driver | a turn is held | outside `REQUESTING`: turn dropped. Text: assistant item, finish. Calls with an ID already accepted this run: assistant item, stop. Other calls: batch begun, `EXECUTING_TOOLS`. |
+| `acceptTurn` | Driver | a turn is held | outside `REQUESTING`: turn dropped. Text: assistant item, finish. Calls with an ID already accepted this run: stop, no assistant item, history unchanged. Other calls: batch begun, `EXECUTING_TOOLS`. |
 | `nextCall` | Driver | `EXECUTING_TOOLS`, no cursor, no effect | cursor = next call; with no next call, `REQUESTING` (the tool loop) |
 | `admit(result)` | Driver | cursor set, not yet admitted, no effect | lc not `RUNNING`: rejected, no effect. `LIMITED`: call `COMPLETED`, no effect. `EXECUTED`: call `EXECUTING`, one effect start. |
 | `effectFinish(ok)` | ToolEffect | an effect runs | call `COMPLETED` or `FAILED_AFTER_START` |
 | `recordResult` | Driver | admitted cursor call settled | result appended. In `STOPPING`: drain. After `LIMITED` or `FAILED_AFTER_START`: stop. |
 | `stop` | User or driver | active; `REQUESTING` or `EXECUTING_TOOLS`, or `STOPPING` with a cancelled result to drain | cancel; lc `RUNNING → STOPPING`; pending calls cancelled; cancelled results drained in order |
-| `close` | Content | not disposed | no active run: `DISPOSED`. Active run: `STOPPING`, lc `CLOSING`, pending cancelled, provisional cleared, no drain. |
+| `close` | Content | not disposed | no active run: `DISPOSED`, registry disposed. Active run: `STOPPING`, lc `CLOSING`, pending calls cancelled and their cancelled results drained in order, provisional cleared, registry disposed (matches `RunSession.dispose`). |
 | `finish` | Driver | `STOPPING`, driver idle, batch settled | `IDLE`, or `DISPOSED` after close |
 | `newGeneration` | CacheGeneration | `IDLE`, generation below `MAX_GENERATIONS` | generation `+1`; request prefix cleared |
 
@@ -208,9 +208,10 @@ Invariants, each with a mutant and a witness:
 | INV-C1 | Each call has at most one result. While a request is in flight, every call of the previous batch has exactly one result. | `mut_completeEarly`: `nextCall` returns Complete with unrecorded results | W-SUCCESS |
 | INV-C2 | If the lifecycle was not `RUNNING` before a step in the same run, the step starts no effect | `mut_admitAfterStop`: admission ignores the lifecycle phase | W-STOP-WAIT |
 | INV-C3 | `IDLE` or `DISPOSED` implies no active run and a settled batch | `mut_finishDuringEffect` | W-STOP-WAIT |
-| INV-C4 | No effect starts twice, and a started call never becomes `PENDING` again | `mut_acceptReusedIds`: batch begun without the accepted-call-ID check | W-ID-REUSE |
-| INV-C5 | Within one generation, request N is a prefix of request N+1 | `mut_compactHistory`: history rewritten without a new generation | W-RETRY |
+| INV-C4 | No effect starts twice, a started call never becomes `PENDING` again, and a begun batch's call IDs are disjoint from every previously accepted occurrence of the same run (including admitted-only occurrences) | `mut_acceptReusedIds` and `mut_reuseStartedOnly` | W-ID-REUSE |
+| INV-C5 | Within one generation, the request head is constant and request N is a prefix of request N+1 | `mut_compactHistory`: history rewritten without a new generation | W-RETRY |
 | INV-C6 | Disposed content has no provisional delivery, and a `DISPOSED` session's history does not change | `mut_provisionalAfterDispose` | W-CLOSE |
+| INV-C7 | Rejecting a reused call ID commits no assistant item: a `REQUESTING → STOPPING` step that drops a `CALLS` turn leaves history unchanged | `mut_appendBeforeReject` | W-ID-REUSE |
 | INV-R1 | No registration after cancel or dispose | `mut_registerIgnoringCancel` | W-STOP-WAIT |
 | INV-R2 | Effect settles only after the computation terminates (`DONE`, `ABORTED` or `TIMED_OUT`) | `mut_settleEarly` | W-RESTART |
 | INV-R3 | Refused admission makes no platform access | `mut_accessAfterRefusal` | W-REFUSED |
@@ -231,7 +232,7 @@ Witnesses are `val` predicates. Each is checked as `--invariant="not(W)"` and mu
 | W-STOP-WAIT (`read_execution`) | Cancel after smart-wait ticks, then the read settles as `ABORTED` |
 | W-RETRY | A retry, then a terminal response, on the second or later request of a generation |
 | W-CLOSE | Close during a tool batch |
-| W-ID-REUSE | A reused call ID is rejected and the run stops |
+| W-ID-REUSE | A reused call ID is rejected, the run stops, and accepted history is unchanged |
 | W-REFUSED | Admission is refused |
 | W-INDEX-TIMEOUT | Dumb mode outlasts the bound and gives INDEX_NOT_READY |
 
@@ -250,7 +251,7 @@ quint run    $M/agent_coarse.qnt --main=agent_coarse --step=stepCorpus --max-sam
 ```
 
 Results:
-- Backend: TLC. All models are finite, so TLC checks the complete reachable state space with no step bound. `agent_coarse` has 137,886 distinct states (depth 39), `read_execution` 7,883, `read_refinement` 14,328. Each check takes about 10 s.
+- Backend: TLC. All models are finite, so TLC checks the complete reachable state space with no step bound. `agent_coarse` has 3,087,917 distinct states (depth 44, INV_C1), `read_execution` 5,677, `read_refinement` 11,322. Each check takes about 10 s to 3 min.
 - Apalache is not used. On `agent_coarse`, Apalache took 176 s at 7 steps and did not finish 12 steps in 10 minutes.
 - A variable without a bound makes TLC run without end. Every counter needs a guard.
 - A `pass` check needs exit 0 and `[ok]`. A witness or mutant check needs a reported violation. A crash also exits non-zero and is not a counterexample.

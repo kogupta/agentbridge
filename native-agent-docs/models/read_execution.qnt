@@ -464,6 +464,7 @@ module read_execution {
 
   val INV_R1 = not(registered and blockedBeforeRegister)
     and not(cancelled and resultReady)
+    and not(cancelled and registered)
   val INV_R2 = not(settled) or computation == "DONE" or computation == "ABORTED" or computation == "TIMED_OUT"
   val INV_R3 = not(refused and platformAccessed)
   // INDEX_NOT_READY is either the bounded wait result or an escaped

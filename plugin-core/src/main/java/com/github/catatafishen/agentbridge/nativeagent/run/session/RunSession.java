@@ -223,6 +223,7 @@ public final class RunSession {
             else cancellationFailure.addSuppressed(failure);
         }
         phase = Phase.STOPPING;
+        appendCancelledInOrder(current);
         if (cancellationFailure != null) throw cancellationFailure;
     }
 

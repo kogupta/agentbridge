@@ -459,24 +459,36 @@ module agent_coarse {
   val INV_C3 = (s.phase == "IDLE" or s.phase == "DISPOSED") implies (not(s.active) and batchSettled(s))
 
   // I3: no call effect starts twice, and a started call never becomes admissible again.
+  // A begun batch's call IDs are disjoint from every previously accepted occurrence of
+  // the same run, including occurrences that were only admitted (LIMITED/REJECTED).
   val INV_C4 =
     s.slot0.starts <= 1 and s.slot1.starts <= 1 and s.slot2.starts <= 1
       and (s.n <= 0 or s.slot0.status != "PENDING" or not(s.startedIds.contains(s.slot0.key)))
       and (s.n <= 1 or s.slot1.status != "PENDING" or not(s.startedIds.contains(s.slot1.key)))
       and (s.n <= 2 or s.slot2.status != "PENDING" or not(s.startedIds.contains(s.slot2.key)))
+      and ((s.phase == "EXECUTING_TOOLS" and prev.phase == "REQUESTING" and prev.turnId0 != 0)
+           implies (not(prev.acceptedIds.contains(callKey(prev.runId, prev.turnId0)))
+                    and (prev.turnId1 == 0 or not(prev.acceptedIds.contains(callKey(prev.runId, prev.turnId1))))
+                    and (prev.turnId2 == 0 or not(prev.acceptedIds.contains(callKey(prev.runId, prev.turnId2))))))
 
-  // I13: within one generation, the stable serialized request head and the
-  // serialized input sequence are append-only.
+  // I13: within one generation, the stable serialized request head is constant and
+  // the serialized input sequence is append-only.
   val INV_C5 =
-    (s.generation == prev.generation and s.requestsInGen == prev.requestsInGen + 1)
-      implies (s.requestHead == prev.requestHead
-               and isPrefix(prev.lastRequest, s.lastRequest))
+    (s.generation == prev.generation implies s.requestHead == prev.requestHead)
+      and ((s.generation == prev.generation and s.requestsInGen == prev.requestsInGen + 1)
+           implies isPrefix(prev.lastRequest, s.lastRequest))
 
   // I11: disposed content receives no provisional delivery, a DISPOSED
   // session's history does not change, and its read registry is disposed.
   val INV_C6 =
     (s.disposed implies (not(s.provisional) and s.registryDisposed))
       and (prev.phase == "DISPOSED" implies s.history == prev.history)
+
+  // I3/I4: rejecting a reused call ID happens before the assistant item is
+  // committed: no REQUESTING -> STOPPING step with a dropped CALLS turn appends history.
+  val INV_C7 =
+    (s.phase == "STOPPING" and prev.phase == "REQUESTING" and prev.turn == "CALLS" and s.turn == "NONE")
+      implies s.history == prev.history
 
   // ---- Consistency lemmas (checked like invariants; they tie cursor and effect
   // bookkeeping to lifecycle state; no mutant or witness) ----
@@ -518,9 +530,10 @@ module agent_coarse {
   // Close during a tool batch.
   val W_CLOSE = s.disposed and not(prev.disposed) and prev.phase == "EXECUTING_TOOLS"
 
-  // A reused call ID is rejected and the run stops.
+  // A reused call ID is rejected and the run stops without committing the assistant item.
   val W_ID_REUSE =
     prev.phase == "REQUESTING" and prev.turn == "CALLS" and s.phase == "STOPPING" and s.turn == "NONE"
+      and s.history == prev.history
 
   // ---- Mutant fault actions (used only by mutants/<INV>.qnt) ----
 
@@ -576,13 +589,34 @@ module agent_coarse {
     prev' = s,
   }
 
+  // INV_C7: reuse is rejected only against started occurrences, so a call that was
+  // merely admitted (LIMITED/REJECTED) can be accepted again.
+  action mut_reuseStartedOnly = all {
+    s.phase == "REQUESTING",
+    s.turn == "CALLS",
+    s.acceptedIds.contains(key0(s)),
+    not(s.startedIds.contains(key0(s))),
+    s' = begun(acceptedTurn(s), key0(s), key1(s), key2(s)),
+    prev' = s,
+  }
+
+  // INV_C7: the assistant item is committed before a reused batch is rejected.
+  action mut_appendBeforeReject = all {
+    s.phase == "REQUESTING",
+    s.turn == "CALLS",
+    s.acceptedIds.contains(key0(s)),
+    s' = stopped(acceptedTurn(s)),
+    prev' = s,
+  }
+
   // Mutant steps: check with --step=step_mut_<INV> --invariant=<INV>; a counterexample
   // is required. They live here, not in importing modules, because Quint 0.32.0
   // fails to flatten `import ... as B` names for TLC and Apalache (QNT404).
   action step_mut_INV_C1 = any { step, mut_completeEarly }
   action step_mut_INV_C2 = any { step, mut_admitAfterStop }
   action step_mut_INV_C3 = any { step, mut_finishDuringEffect }
-  action step_mut_INV_C4 = any { step, mut_acceptReusedIds }
+  action step_mut_INV_C4 = any { step, mut_acceptReusedIds, mut_reuseStartedOnly }
   action step_mut_INV_C5 = any { step, mut_compactHistory }
   action step_mut_INV_C6 = any { step, mut_provisionalAfterDispose }
+  action step_mut_INV_C7 = any { step, mut_appendBeforeReject }
 }

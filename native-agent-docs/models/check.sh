@@ -44,7 +44,7 @@ check() {
   fi
   [[ $verdict == BAD ]] && BAD=1
   local states
-  states=$(grep -o -E '[0-9]+ distinct states found' "$out" | head -1 | cut -d' ' -f1)
+  states=$(sed 's/,//g' "$out" | grep -o -E '[0-9]+ distinct states found' | tail -1 | cut -d' ' -f1)
   printf '%s\t%s\t%s\t%s\t%s\n' "$name" "$expect" "$rc" "$verdict" "${states:--}" >>"$SUMMARY"
   echo "   exit=$rc expect=$expect states=${states:--} -> $verdict"
 }

@@ -43,6 +43,18 @@ The script finds its targets in the model files. Raw output goes to `.agent-work
 
 - `agent_coarse` holds its state in one record `s`. `prev` is the pre-state of the last step, and every action, mutants included, sets `prev' = s`. Transition invariants compare `prev` with `s`.
 - A batch in `agent_coarse` has at most three calls, held in the fixed slots `slot0`, `slot1` and `slot2`. Call key = `10*run + localId`.
+
+## Bounds and cutoff
+
+Each counter is guarded (rule 2) and is claimed complete for the modeled defect classes on these grounds:
+
+- `MAX_TURNS=2`, `MAX_RUNS=2`, `MAX_GENERATIONS=2`: the guards mirror product limits (`RunLimits`, MODEL, PROMPT_CACHE). Two runs cover cross-run accepted-ID clearing and reuse; two turns cover prefix extension plus the turn-limit stop; a further turn, run or generation repeats the same interaction shapes with higher counters.
+- Three calls per batch: subset-complete over local IDs `{1,2,3}` in ascending order. Slot behavior is position-indexed and ID-agnostic, so permuting IDs within a batch is state-symmetric and adds no behavior.
+- One retry per request: mirrors `RetryPolicy`; `W_RETRY` covers a retry on the second or later request of a generation.
+- `INDEX_BOUND=2`: the minimal tick bound that distinguishes wait-under-bound, timeout at the bound, and an escaped `IndexNotReadyException` strictly before the bound.
+- `MAX_RESTARTS=3`: one restart exercises clock reset; more than two exercise restart-after-restart. The counter bounds the model only — restart time is unbounded in the product (SR-016).
+- `MAX_EDITS=2`, `MAX_DUMB=2`: one change exercises version/count drift, two exercise drift after a restart and re-entering dumb mode mid-read.
+- Deadlines and wall-clock time are not modeled; budget refusals are abstracted by the turn/tool-limit guards.
 - `read_execution` assigns every variable in every action.
 - ITF traces label state 0 with the step action name (for example `stepCorpus`), not `init`.
 
