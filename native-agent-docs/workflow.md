@@ -65,6 +65,8 @@ Tracked under `native-agent-docs/`. One directory per feature:
 - `<feature>/design.md`: actual Java surface, ownership, algorithm and rejected alternatives. It references `spec.json` rows and code; it does not copy requirement text, matrices or signatures.
 - `<feature>/review.md`: append-only review ledger with current state at the top.
 
+Tracker: `tracker/clauses/clauses.sql` is the tracked clause authority for new work. The ledger (`tracker/ledger.sqlite`, gitignored) holds dev-only history, never product state. Frozen milestone 0/1 `spec.json`, `design.md` and `review.md` stay authoritative for their slices.
+
 Generated receipts and packets are disposable outputs tied to content hashes, kept under the ignored `.agent-work/`, never editable completion claims. Regenerate source hashes (`EV-SOURCE`) from current paths; do not maintain hand-written manifests.
 
 When a second feature exists, move shared decisions from `product.md` into `decisions.json` (key, primitive type, allowed values, selected value, rationale, evidence IDs; no feature-level override or implicit default). Until then, `product.md` Decisions is the registry.
@@ -193,32 +195,32 @@ Progress report after each semantic stage: source changes; observable behavior i
 | Any + missing environment/reviewer/access | Same state, BLOCKED | Preserve resume point; no receipt |
 | Any success + upstream hash change | Earliest affected draft | Invalidate dependent receipts only |
 
-Receipts are evidence, not a mutable `status=valid` flag. Write results atomically after completion. No workflow server, queue or orchestration service.
+Receipts are evidence, not a mutable `status=valid` flag. Write results atomically after completion. No workflow server, queue or orchestration service; a local dev-only ledger is allowed (Tracker).
 
 ## Formal tools
 
-Default: none (`product.md` FORMAL_TOOL_DEFAULT). Strict JSON plus fixed checks cover decisions, references, coverage and small state tables. Quint fits operational Stop/admission interleavings; Alloy 6 fits relational ownership constraints. Adopt at most one, only for a concrete question typing and testing cannot answer cheaply.
+Strict JSON plus fixed checks cover decisions, references, coverage and small state tables. Quint fits operational Stop/admission interleavings. Quint only, for interactions between independent owners, as layered models (`product.md` FORMAL_TOOL_DEFAULT).
 
-If a spike is authorized: one run, bounded calls, Stop, queued/start/completion events, content disposal. No PSI, OAuth or UI. Require a reachable positive scenario and a deliberately broken rule that yields the expected counterexample. Record bounds, backend and solver mode; "no counterexample" is not an unbounded proof. Quint's Apalache is bounded (`--max-steps`, default 10) and its simulator does not check temporal properties ([Quint docs](https://quint.sh/docs/model-checkers)). Alloy `check` searches counterexamples within scope ([Practical Alloy](https://practicalalloy.github.io/chapters/structural-topics/topics/commands/index.html)). Keep the resulting regression test, archive the model, and never keep a permanent normative twin of the transition table.
+If a spike is authorized: one run, bounded calls, Stop, queued/start/completion events, content disposal. No PSI, OAuth or UI. Require a reachable positive scenario and a deliberately broken rule that yields the expected counterexample. Record bounds, backend and solver mode; "no counterexample" is not an unbounded proof. Quint's Apalache is bounded (`--max-steps`, default 10) and its simulator does not check temporal properties ([Quint docs](https://quint.sh/docs/model-checkers)). Alloy `check` searches counterexamples within scope ([Practical Alloy](https://practicalalloy.github.io/chapters/structural-topics/topics/commands/index.html)). Keep the resulting regression test. Platform behavior (PSI, dumb mode, write actions) is allowed only as abstract environment actions. Models are tracked evidence whose conformance is checked by trace-replay tests. They are not normative spec text, so "archive the model" and "never keep a permanent normative twin" do not apply to them.
 
 ## Derive rather than maintain
 
-Derive modules and dependencies from Gradle; declarations, references, implementations and callers from IntelliJ; frozen signatures from compiler-visible declarations; test outcomes from runner reports; touched files from actual mutations. Maintain only decisions, requirements, assumptions, acceptance oracles and requirement-to-enforcement mapping. No permanent graph, duplicate index, spec-to-Java generator or model of every class.
+Derive modules and dependencies from Gradle; declarations, references, implementations and callers from IntelliJ; frozen signatures from compiler-visible declarations; test outcomes from runner reports; touched files from actual mutations. Maintain only decisions, requirements, assumptions, acceptance oracles and requirement-to-enforcement mapping. No permanent graph, duplicate index, spec-to-Java generator or model of every class. A tracker binding row records a declaration found through IntelliJ at binding time; it is evidence, not a maintained declaration index.
 
 ## Feature slices
 
-A slice's stage bindings are in its `spec.json`. Its state is only the Current state section of its `review.md`.
+A slice's stage bindings are in its `spec.json`. Slice state stays in `review.md` for frozen slices; new work records review state in tracker review tables.
 
 | Slice | Roadmap milestone | Code |
 |---|---|---|
 | `lifecycle-admission/` | 0 | `plugin-core/.../nativeagent/lifecycle/` |
 | `domain-run-driver/` | 1 | `plugin-core/.../nativeagent/run/` (Java and Kotlin) |
 | `semantic-reads/` | 2 | Superseded by the five read slices below; no code |
-| `read-domain/` | 2 (R1) | Not installed (specification draft) |
-| `read-pipeline/` | 2 (R2) | Not installed (specification draft) |
-| `read-text-search/` | 2 (R3) | Not installed (specification draft) |
-| `read-symbols/` | 2 (R4) | Not installed (specification draft) |
-| `read-references/` | 2 (R5) | Not installed (specification draft) |
+| `read-domain/` | 2 (R1) | Clause source until the breakdown plan qualifies |
+| `read-pipeline/` | 2 (R2) | Clause source until the breakdown plan qualifies |
+| `read-text-search/` | 2 (R3) | Clause source until the breakdown plan qualifies |
+| `read-symbols/` | 2 (R4) | Clause source until the breakdown plan qualifies |
+| `read-references/` | 2 (R5) | Clause source until the breakdown plan qualifies |
 
 ## Lifecycle/admission slice stages
 
@@ -245,4 +247,4 @@ Implement the frozen API. Apply effects through the real admission boundary, nev
 
 ## Deliberately not built
 
-No generic specification language, predicate evaluator, solver framework, durable state-machine twin, production code generation, workflow server, event store, graph database, duplicate PSI index, all-repository context collector, reflection-based registration, generic effects runtime, coroutine wrapper for every Java method, mandatory JSpecify/NullAway, or Java 25 compatibility break without a product decision.
+No generic specification language, predicate evaluator, solver framework, durable state-machine twin, production code generation, workflow server, duplicate PSI index, all-repository context collector, reflection-based registration, generic effects runtime, coroutine wrapper for every Java method, mandatory JSpecify/NullAway, or Java 25 compatibility break without a product decision.

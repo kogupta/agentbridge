@@ -57,7 +57,7 @@ This table is the one canonical decision registry until `workflow.md` moves deci
 | OUTCOMES | Operation-local sealed outcomes (`SymbolLookupOutcome`, `RenameOutcome`, `ProviderOutcome`, …). No generic `Either`/`Try`/`Result`, no giant `AgentError`. The `status/code/content` envelope exists only at the LLM boundary. Cancellation is control flow. Violated invariants throw. |
 | NULLNESS | No JSpecify/NullAway. Existing JetBrains annotations plus constructor/boundary validation. No whole-program null-safety claim. |
 | OBSERVABILITY | IntelliJ `Logger` for bounded technical diagnostics plus a tiny run-owned `RunStats`. No OpenTelemetry, exporters, metrics registry, event bus or custom JFR events. |
-| FORMAL_TOOL_DEFAULT | None. A targeted Quint spike only if admission interleavings stay materially uncertain after explicit state/API design. |
+| FORMAL_TOOL_DEFAULT | Quint for interactions between independent owners (layered models, `workflow.md` Formal tools); none for local value logic. |
 | PROMPT_CACHE | Within one cache generation, each provider request is a byte-exact prefix extension of the previous request. Cache resets are explicit typed boundaries. See Prompt-cache stability. |
 | DONOR_SUBTRACTION | Done before dogfood, by owner decision. The donor runtime and PSI tool packages are removed on `native-agent-workflow`. Native tools are written fresh from the contracts in this file; donor code on `master` is reference evidence only, never an extraction source or fallback path. Dogfood still compares against Pi + idea-facade. Remove any remaining donor-only dependency or packaging as soon as nothing native reaches it. |
 
