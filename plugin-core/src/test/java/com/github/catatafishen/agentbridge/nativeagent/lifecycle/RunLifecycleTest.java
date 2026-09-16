@@ -24,6 +24,8 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RunLifecycleTest {
+    private static final long ASYNC_TIMEOUT_SECONDS = 1;
+
     @Test
     void singleRunOwnership() {
         RunLifecycle lifecycle = new RunLifecycle();
@@ -85,7 +87,7 @@ class RunLifecycleTest {
 
         CyclicBarrier barrier = new CyclicBarrier(2);
         Callable<RunLifecycle.ExecutionResult> competingFirst = () -> {
-            barrier.await(5, TimeUnit.SECONDS);
+            barrier.await(ASYNC_TIMEOUT_SECONDS, TimeUnit.SECONDS);
             return lifecycle.execute(batch, first, () -> {
                 firstEntries.incrementAndGet();
                 entered.countDown();
@@ -96,13 +98,15 @@ class RunLifecycleTest {
         try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
             Future<RunLifecycle.ExecutionResult> a = executor.submit(competingFirst);
             Future<RunLifecycle.ExecutionResult> b = executor.submit(competingFirst);
-            assertTrue(entered.await(5, TimeUnit.SECONDS));
+            assertTrue(entered.await(ASYNC_TIMEOUT_SECONDS, TimeUnit.SECONDS));
 
             assertEquals(new RunLifecycle.ExecutionResult.Rejected(RunLifecycle.ExecutionRejection.OUT_OF_ORDER),
                 lifecycle.execute(batch, second, secondEntries::incrementAndGet));
 
             release.countDown();
-            List<RunLifecycle.ExecutionResult> results = List.of(a.get(5, TimeUnit.SECONDS), b.get(5, TimeUnit.SECONDS));
+            List<RunLifecycle.ExecutionResult> results = List.of(
+                a.get(ASYNC_TIMEOUT_SECONDS, TimeUnit.SECONDS),
+                b.get(ASYNC_TIMEOUT_SECONDS, TimeUnit.SECONDS));
             assertEquals(1, results.stream().filter(RunLifecycle.ExecutionResult.Executed.class::isInstance).count());
             assertTrue(results.contains(
                 new RunLifecycle.ExecutionResult.Rejected(RunLifecycle.ExecutionRejection.ALREADY_EXECUTING)));
@@ -136,7 +140,7 @@ class RunLifecycleTest {
             assertEquals(0, entries.get());
             assertEquals(Lifecycle.Phase.STOPPING, stoppedPhase(stopped));
             assertEquals(new RunLifecycle.ExecutionResult.Rejected(RunLifecycle.ExecutionRejection.RUN_NOT_ACCEPTING_EFFECTS),
-                queued.get(5, TimeUnit.SECONDS));
+                queued.get(ASYNC_TIMEOUT_SECONDS, TimeUnit.SECONDS));
             assertEquals(Call.Status.CANCELLED_BEFORE_START, batchStatus(lifecycle, batch, call));
         }
     }
@@ -157,7 +161,7 @@ class RunLifecycleTest {
                     entered.countDown();
                     await(release);
                 }));
-            assertTrue(entered.await(5, TimeUnit.SECONDS));
+            assertTrue(entered.await(ASYNC_TIMEOUT_SECONDS, TimeUnit.SECONDS));
             RunLifecycle.StopResult firstStop = lifecycle.stop(run);
             assertInstanceOf(RunLifecycle.StopResult.Acknowledged.class, firstStop);
             assertEquals(firstStop, lifecycle.stop(run));
@@ -167,7 +171,8 @@ class RunLifecycleTest {
             assertEquals(new RunLifecycle.StartRunResult.Rejected(RunLifecycle.StartRejection.BUSY), lifecycle.startRun());
             assertEquals(new RunLifecycle.FinishRunResult.Rejected(RunLifecycle.FinishRejection.BATCH_UNSETTLED), lifecycle.finishRun(run));
             release.countDown();
-            assertInstanceOf(RunLifecycle.ExecutionResult.Executed.class, executing.get(5, TimeUnit.SECONDS));
+            assertInstanceOf(RunLifecycle.ExecutionResult.Executed.class,
+                executing.get(ASYNC_TIMEOUT_SECONDS, TimeUnit.SECONDS));
             assertEquals(Call.Status.COMPLETED, batchStatus(lifecycle, batch, first));
             assertEquals(Call.Status.CANCELLED_BEFORE_START, batchStatus(lifecycle, batch, second));
             assertInstanceOf(RunLifecycle.FinishRunResult.Finished.class, lifecycle.finishRun(run));
@@ -286,7 +291,7 @@ class RunLifecycleTest {
                     entered.countDown();
                     await(release);
                 }));
-            assertTrue(entered.await(5, TimeUnit.SECONDS));
+            assertTrue(entered.await(ASYNC_TIMEOUT_SECONDS, TimeUnit.SECONDS));
             assertEquals(Lifecycle.Phase.STOPPING, stoppedPhase(lifecycle.stop(run)));
             assertEquals(Lifecycle.Phase.CLOSING, lifecycle.close().phase());
             assertEquals(Lifecycle.Phase.CLOSING, lifecycle.close().phase());
@@ -305,7 +310,8 @@ class RunLifecycleTest {
                 lifecycle.finishRun(run));
 
             release.countDown();
-            assertInstanceOf(RunLifecycle.ExecutionResult.Executed.class, execution.get(5, TimeUnit.SECONDS));
+            assertInstanceOf(RunLifecycle.ExecutionResult.Executed.class,
+                execution.get(ASYNC_TIMEOUT_SECONDS, TimeUnit.SECONDS));
             assertEquals(Call.Status.COMPLETED, batchStatus(lifecycle, batch, active));
             assertEquals(Call.Status.CANCELLED_BEFORE_START, batchStatus(lifecycle, batch, pending));
             assertEquals(Lifecycle.Phase.CLOSED, finishedPhase(lifecycle.finishRun(run)));
@@ -390,12 +396,12 @@ class RunLifecycleTest {
                 entered.countDown();
                 await(release);
             }));
-            assertTrue(entered.await(5, TimeUnit.SECONDS));
+            assertTrue(entered.await(ASYNC_TIMEOUT_SECONDS, TimeUnit.SECONDS));
             Batch.Snapshot before = availableSnapshot(lifecycle.batchSnapshot(batch));
             assertEquals(Call.Status.EXECUTING, before.calls().getFirst().status());
             assertEquals(Lifecycle.Phase.STOPPING, stoppedPhase(lifecycle.stop(run)));
             release.countDown();
-            execution.get(5, TimeUnit.SECONDS);
+            execution.get(ASYNC_TIMEOUT_SECONDS, TimeUnit.SECONDS);
             assertEquals(Call.Status.EXECUTING, before.calls().getFirst().status());
             assertEquals(Call.Status.COMPLETED, batchStatus(lifecycle, batch, call));
         }
@@ -471,7 +477,7 @@ class RunLifecycleTest {
             edtBlocked.countDown();
             await(releaseEdt);
         });
-        assertTrue(edtBlocked.await(5, TimeUnit.SECONDS));
+        assertTrue(edtBlocked.await(ASYNC_TIMEOUT_SECONDS, TimeUnit.SECONDS));
         AtomicInteger entries = new AtomicInteger();
         FutureTaskResult queued = new FutureTaskResult();
         EventQueue.invokeLater(() -> queued.set(lifecycle.execute(batch, call, entries::incrementAndGet)));
@@ -493,7 +499,7 @@ class RunLifecycleTest {
             effectEntered.countDown();
             await(releaseEffect);
         })));
-        assertTrue(effectEntered.await(5, TimeUnit.SECONDS));
+        assertTrue(effectEntered.await(ASYNC_TIMEOUT_SECONDS, TimeUnit.SECONDS));
         assertEquals(Lifecycle.Phase.STOPPING, stoppedPhase(admittedLifecycle.stop(admittedRun)));
         assertEquals(Call.Status.EXECUTING, batchStatus(admittedLifecycle, admittedBatch, admittedCall));
         assertEquals(new RunLifecycle.StartRunResult.Rejected(RunLifecycle.StartRejection.BUSY), admittedLifecycle.startRun());
@@ -565,7 +571,7 @@ class RunLifecycleTest {
 
     private static void await(CountDownLatch latch) {
         try {
-            if (!latch.await(5, TimeUnit.SECONDS)) {
+            if (!latch.await(ASYNC_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
                 throw new AssertionError("Latch was not released");
             }
         } catch (InterruptedException interrupted) {
@@ -584,7 +590,7 @@ class RunLifecycleTest {
         }
 
         private RunLifecycle.ExecutionResult get() throws InterruptedException {
-            assertTrue(done.await(5, TimeUnit.SECONDS));
+            assertTrue(done.await(ASYNC_TIMEOUT_SECONDS, TimeUnit.SECONDS));
             return result;
         }
     }
