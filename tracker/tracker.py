@@ -397,6 +397,333 @@ def cmd_scan_models(args: argparse.Namespace) -> None:
             print(f"scanned {module} ({digest[:12]}): {len(declarations)} declarations, event {event_id}")
 
 
+# ------------------------------------------------------------------ sources, clauses, exclusions
+
+# Phase 4 source list. Markdown: one field per non-blank line in the cited ranges, pointer
+# `L<n>`. JSON: pointer patterns where `*` matches every list index or object key; a
+# container expands to one field per scalar leaf.
+MARKDOWN_SOURCES = {"native-agent-docs/product.md": [(136, 158), (179, 189), (229, 229)]}
+JSON_SOURCE_GLOB = "native-agent-docs/read-*/spec.json"
+JSON_POINTERS = (
+    "/scope", "/non_goals/*", "/assumptions/*", "/requirements/*/statement",
+    "/acceptance/*/when", "/acceptance/*/then", "/acceptance/*/target", "/decisions/*",
+    "/operation_matrix/*/*", "/null_boundary_matrix/*/*",
+    "/type_safety_audit/*/invalid", "/type_safety_audit/*/type_api_prevention",
+    "/type_safety_audit/*/residual_runtime_obligation", "/type_safety_audit/*/justification",
+    "/stages/*/entry", "/stages/*/exit", "/stages/*/outcome", "/evidence/*/description",
+)
+CLAUSE_KINDS = ("pre", "post", "invariant", "outcome", "decision")
+CLAUSE_SCOPES = ("local", "interaction")
+
+
+def escape_pointer(token: str) -> str:
+    return token.replace("~", "~0").replace("/", "~1")
+
+
+def scalar_text(value: object) -> str:
+    return value if isinstance(value, str) else json.dumps(value)
+
+
+def json_leaves(value: object, pointer: str) -> Iterator[tuple[str, str]]:
+    if isinstance(value, dict):
+        for key, item in value.items():
+            yield from json_leaves(item, f"{pointer}/{escape_pointer(key)}")
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            yield from json_leaves(item, f"{pointer}/{index}")
+    else:
+        yield pointer, scalar_text(value)
+
+
+def expand_pointer(doc: object, pattern: str) -> list[tuple[str, object]]:
+    matches: list[tuple[str, object]] = [("", doc)]
+    for token in pattern.lstrip("/").split("/"):
+        step: list[tuple[str, object]] = []
+        for pointer, node in matches:
+            if isinstance(node, dict):
+                keys = list(node) if token == "*" else ([token] if token in node else [])
+                step.extend((f"{pointer}/{escape_pointer(k)}", node[k]) for k in keys)
+            elif isinstance(node, list):
+                indexes = range(len(node)) if token == "*" else (
+                    [int(token)] if token.isdigit() and int(token) < len(node) else [])
+                step.extend((f"{pointer}/{i}", node[i]) for i in indexes)
+        matches = step
+    return matches
+
+
+def source_fields(rel: str) -> dict[str, str]:
+    """Pointer -> decoded field text for one listed source file, in document order."""
+    path = ROOT.parent / rel
+    if not path.is_file():
+        raise SystemExit(f"Error: source {rel} does not exist")
+    fields: dict[str, str] = {}
+    if rel in MARKDOWN_SOURCES:
+        lines = path.read_bytes().decode("utf-8").splitlines(keepends=True)
+        for first, last in MARKDOWN_SOURCES[rel]:
+            if last > len(lines):
+                raise SystemExit(f"Error: {rel} has no line {last}")
+            for n in range(first, last + 1):
+                if lines[n - 1].strip():
+                    fields[f"L{n}"] = lines[n - 1]
+        return fields
+    doc = json.loads(path.read_bytes().decode("utf-8"))
+    for pattern in JSON_POINTERS:
+        matches = expand_pointer(doc, pattern)
+        if not matches:
+            raise SystemExit(f"Error: {rel} has no field matching {pattern}")
+        for pointer, node in matches:
+            fields.update(json_leaves(node, pointer))
+    return fields
+
+
+def listed_sources() -> list[str]:
+    json_files = sorted(str(p.relative_to(ROOT.parent)) for p in ROOT.parent.glob(JSON_SOURCE_GLOB))
+    return [*MARKDOWN_SOURCES, *json_files]
+
+
+def cmd_scan_sources(args: argparse.Namespace) -> None:
+    files = args.files or listed_sources()
+    scanned = []
+    for rel in files:  # read everything before the transaction opens
+        digest = hashlib.sha256((ROOT.parent / rel).read_bytes()).hexdigest()
+        scanned.append((rel, digest, source_fields(rel)))
+    actor_id, kind = parse_actor(args.actor)
+    with write_tx(args.db) as conn:
+        for rel, digest, fields in scanned:
+            latest = conn.execute(
+                "SELECT basis_digest FROM event WHERE command = 'scan-sources' AND subject = ?"
+                " ORDER BY id DESC LIMIT 1", (rel,)).fetchone()
+            if latest is not None and latest["basis_digest"] == digest:
+                print(f"unchanged {rel} ({digest[:12]})")
+                continue
+            event_id = record_event(conn, actor_id, kind, "scan-sources", rel, digest)
+            for pointer, text in fields.items():
+                conn.execute(
+                    "INSERT INTO source_field(file, pointer, source_event_id, start_offset, end_offset,"
+                    " source_sha256) VALUES (?, ?, ?, 0, ?, ?)",
+                    (rel, pointer, event_id, len(text), digest))
+            print(f"scanned {rel} ({digest[:12]}): {len(fields)} fields, event {event_id}")
+
+
+def current_field(conn: sqlite3.Connection, rel: str, pointer: str, start: int, end: int) -> sqlite3.Row:
+    row = conn.execute("SELECT * FROM current_source_field WHERE file = ? AND pointer = ?",
+                       (rel, pointer)).fetchone()
+    if row is None:
+        raise SystemExit(f"Error: {rel}#{pointer} is not a current source field; run scan-sources")
+    if not 0 <= start < end <= row["end_offset"]:
+        raise SystemExit(f"Error: span {start}-{end} is outside {rel}#{pointer} (0-{row['end_offset']})")
+    return row
+
+
+def parse_span(spec: str) -> tuple[str, str, int, int]:
+    """FILE#POINTER[@START-END]; no range means the whole field."""
+    match = re.fullmatch(r"([^#]+)#([^@]+)(?:@(\d+)-(\d+))?", spec)
+    if not match:
+        raise SystemExit(f"Error: span {spec!r} must look like FILE#POINTER or FILE#POINTER@START-END")
+    rel, pointer, start, end = match.groups()
+    return rel, pointer, int(start) if start else 0, int(end) if end else -1
+
+
+def resolved_span(conn: sqlite3.Connection, spec: str) -> tuple[sqlite3.Row, int, int]:
+    rel, pointer, start, end = parse_span(spec)
+    if end == -1:
+        row = conn.execute("SELECT end_offset FROM current_source_field WHERE file = ? AND pointer = ?",
+                           (rel, pointer)).fetchone()
+        end = row["end_offset"] if row is not None else 1
+    return current_field(conn, rel, pointer, start, end), start, end
+
+
+def insert_clause(conn: sqlite3.Connection, args: argparse.Namespace, rev: int, event_id: int,
+                  fields: dict[str, object], spans: list[str]) -> None:
+    text = str(fields["text"])
+    conn.execute(
+        'INSERT INTO clause(id, rev, kind, scope, "trigger", outcome, text, text_sha256, status, reason,'
+        " event_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (args.id, rev, fields["kind"], fields["scope"], fields["trigger"], fields["outcome"], text,
+         hashlib.sha256(text.encode("utf-8")).hexdigest(), fields["status"], fields["reason"], event_id))
+    for spec in spans:
+        row, start, end = resolved_span(conn, spec)
+        conn.execute(
+            "INSERT INTO clause_source(clause_id, clause_rev, file, pointer, start_offset, end_offset,"
+            " source_event_id, source_sha256) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (args.id, rev, row["file"], row["pointer"], start, end, row["source_event_id"],
+             row["source_sha256"]))
+
+
+def cmd_clause(args: argparse.Namespace) -> None:
+    actor_id, kind = parse_actor(args.actor)
+    with write_tx(args.db) as conn:
+        existing = latest_revision(conn, "clause", args.id)
+        if args.clause_action in ("add", "revise"):
+            if args.clause_action == "add" and existing is not None:
+                raise SystemExit(f"Error: clause {args.id} already exists; use revise")
+            if args.clause_action == "revise" and (existing is None or existing["status"] == "retired"):
+                raise SystemExit(f"Error: no active clause {args.id}")
+            base = dict(existing) if existing is not None else {}
+            fields: dict[str, object] = {
+                name: getattr(args, name) if getattr(args, name) is not None else base.get(name)
+                for name in ("kind", "scope", "trigger", "outcome", "text")}
+            if fields["kind"] not in CLAUSE_KINDS:
+                raise SystemExit(f"Error: clause kind must be one of {', '.join(CLAUSE_KINDS)}")
+            if fields["scope"] not in CLAUSE_SCOPES:
+                raise SystemExit(f"Error: clause scope must be one of {', '.join(CLAUSE_SCOPES)}")
+            if not fields["text"]:
+                raise SystemExit("Error: clause needs --text")
+            spans = args.span or []
+            if not spans and existing is not None:
+                spans = [f"{s['file']}#{s['pointer']}@{s['start_offset']}-{s['end_offset']}"
+                         for s in conn.execute("SELECT * FROM clause_source WHERE clause_id = ? AND clause_rev = ?",
+                                               (args.id, existing["rev"]))]
+            if not spans:
+                raise SystemExit("Error: clause needs at least one --span FILE#POINTER[@START-END]")
+            fields.update(status="active", reason=args.reason)
+            rev = 1 if existing is None else existing["rev"] + 1
+            event_id = record_event(conn, actor_id, kind, f"clause {args.clause_action}", args.id, git_head())
+            insert_clause(conn, args, rev, event_id, fields, spans)
+            print(f"{'added' if rev == 1 else 'revised'} clause {args.id} rev {rev}")
+        else:
+            if existing is None or existing["status"] == "retired":
+                raise SystemExit(f"Error: no active clause {args.id}")
+            if not args.reason:
+                raise SystemExit("Error: clause retire requires --reason")
+            event_id = record_event(conn, actor_id, kind, "clause retire", args.id, git_head())
+            conn.execute(
+                'INSERT INTO clause(id, rev, kind, scope, "trigger", outcome, text, text_sha256, status,'
+                " reason, event_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'retired', ?, ?)",
+                (args.id, existing["rev"] + 1, existing["kind"], existing["scope"], existing["trigger"],
+                 existing["outcome"], existing["text"], existing["text_sha256"], args.reason, event_id))
+            print(f"retired clause {args.id}")
+
+
+def cmd_span(args: argparse.Namespace) -> None:
+    if args.span_action == "gaps":
+        cmd_span_gaps(args)
+        return
+    if not args.span:
+        raise SystemExit("Error: span exclude needs FILE#POINTER[@START-END]")
+    if not args.reason:
+        raise SystemExit("Error: span exclude requires --reason")
+    actor_id, kind = parse_actor(args.actor)
+    with write_tx(args.db) as conn:
+        row, start, end = resolved_span(conn, args.span)
+        event_id = record_event(conn, actor_id, kind, "span exclude", args.span, git_head())
+        conn.execute(
+            "INSERT INTO span_exclusion(file, pointer, start_offset, source_event_id, end_offset, reason,"
+            " source_sha256, event_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (row["file"], row["pointer"], start, row["source_event_id"], end, args.reason,
+             row["source_sha256"], event_id))
+        print(f"excluded {row['file']}#{row['pointer']}@{start}-{end}")
+
+
+def quoted_span(span: object) -> str:
+    """A span is FILE#POINTER[@START-END], or {"at": FILE#POINTER, "quote": TEXT} for the unique occurrence."""
+    if isinstance(span, str):
+        return span
+    if not isinstance(span, dict) or set(span) != {"at", "quote"}:
+        raise SystemExit(f"Error: span {span!r} must be a string or {{at, quote}}")
+    rel, pointer = str(span["at"]).split("#", 1)
+    text = source_fields(rel).get(pointer)
+    if text is None:
+        raise SystemExit(f"Error: {span['at']} is not a listed source field")
+    quote = str(span["quote"])
+    start = text.find(quote)
+    if start < 0 or text.find(quote, start + 1) >= 0:
+        raise SystemExit(f"Error: quote {quote!r} must occur exactly once in {span['at']}")
+    return f"{rel}#{pointer}@{start}-{start + len(quote)}"
+
+
+GAP_TEXT = re.compile(r"^[\s.,;:()\-]*(?:I\d+\.|\d+\.|-)?[\s.,;:()\-]*$")
+
+
+def cmd_span_gaps(args: argparse.Namespace) -> None:
+    """Exclude uncovered segments that hold only whitespace, punctuation or a list label."""
+    actor_id, kind = parse_actor(args.actor)
+    texts: dict[str, dict[str, str]] = {}
+    with write_tx(args.db) as conn:
+        uncovered = conn.execute((QUERIES / "uncovered_source_spans.sql").read_text(encoding="utf-8")).fetchall()
+        excluded = 0
+        for seg in uncovered:
+            fields = texts.setdefault(seg["file"], source_fields(seg["file"]))
+            piece = fields[seg["pointer"]][seg["start_offset"]:seg["end_offset"]]
+            if not GAP_TEXT.match(piece):
+                continue
+            row = current_field(conn, seg["file"], seg["pointer"], seg["start_offset"], seg["end_offset"])
+            spec = f"{seg['file']}#{seg['pointer']}@{seg['start_offset']}-{seg['end_offset']}"
+            event_id = record_event(conn, actor_id, kind, "span exclude", spec, git_head())
+            conn.execute(
+                "INSERT INTO span_exclusion(file, pointer, start_offset, source_event_id, end_offset, reason,"
+                " source_sha256, event_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (row["file"], row["pointer"], seg["start_offset"], row["source_event_id"], seg["end_offset"],
+                 "separator: whitespace, punctuation or list label", row["source_sha256"], event_id))
+            excluded += 1
+        print(f"excluded {excluded} separator segments; {len(uncovered) - excluded} uncovered segments remain")
+
+
+def cmd_apply(args: argparse.Namespace) -> None:
+    """Apply JSON lines of `clause add` and `span exclude` records; lines already applied are skipped.
+
+    {"op": "clause", "id", "kind", "scope", "trigger"?, "outcome"?, "text", "spans": [...]}
+    {"op": "exclude", "span", "reason"}
+    """
+    records = [(n, json.loads(line)) for n, line in
+               enumerate(Path(args.file).read_text(encoding="utf-8").splitlines(), 1) if line.strip()]
+    applied = skipped = 0
+    for n, rec in records:
+        conn = connect(args.db, readonly=True)
+        try:
+            if rec["op"] == "clause":
+                done = conn.execute("SELECT 1 FROM clause WHERE id = ?", (rec["id"],)).fetchone() is not None
+            elif rec["op"] == "exclude":
+                rel, pointer, start, _ = parse_span(quoted_span(rec["span"]))
+                done = conn.execute(
+                    "SELECT 1 FROM span_exclusion x JOIN current_source_field c ON c.file = x.file"
+                    " AND c.pointer = x.pointer AND c.source_event_id = x.source_event_id"
+                    " WHERE x.file = ? AND x.pointer = ? AND x.start_offset = ?",
+                    (rel, pointer, start)).fetchone() is not None
+            else:
+                raise SystemExit(f"Error: {args.file}:{n}: unknown op {rec['op']!r}")
+        finally:
+            conn.close()
+        if done:
+            skipped += 1
+            continue
+        if rec["op"] == "clause":
+            argv = ["clause", "add", rec["id"], "--kind", rec["kind"], "--scope", rec["scope"],
+                    "--text", rec["text"], "--actor", args.actor]
+            for name in ("trigger", "outcome"):
+                if rec.get(name):
+                    argv += [f"--{name}", rec[name]]
+            for span in rec["spans"]:
+                argv += ["--span", quoted_span(span)]
+        else:
+            argv = ["span", "exclude", quoted_span(rec["span"]), "--reason", rec["reason"], "--actor", args.actor]
+        try:
+            with contextlib.redirect_stdout(None):
+                main(["--db", args.db, *argv])
+        except (SystemExit, sqlite3.Error) as exc:
+            raise SystemExit(f"Error: {args.file}:{n}: {exc}") from exc
+        applied += 1
+    print(f"applied {applied}, skipped {skipped} from {args.file}")
+
+
+def cmd_source_text(args: argparse.Namespace) -> None:
+    """Print current source fields as JSON lines (pointer, length, text) for clause authoring."""
+    conn = connect(args.db, readonly=True)
+    try:
+        for rel in args.files or listed_sources():
+            fields = source_fields(rel)
+            current = {r["pointer"]: r for r in conn.execute(
+                "SELECT * FROM current_source_field WHERE file = ?", (rel,))}
+            digest = hashlib.sha256((ROOT.parent / rel).read_bytes()).hexdigest()
+            for pointer, text in fields.items():
+                row = current.get(pointer)
+                if row is None or row["source_sha256"] != digest:
+                    raise SystemExit(f"Error: {rel}#{pointer} is not scanned at the file digest; run scan-sources")
+                print(json.dumps({"span": f"{rel}#{pointer}", "length": len(text), "text": text}))
+    finally:
+        conn.close()
+
+
 # ------------------------------------------------------------------ obligations
 
 OBLIGATION_KINDS = ("invariant", "witness", "mutant", "refinement")
@@ -707,6 +1034,40 @@ def build_parser() -> argparse.ArgumentParser:
     p_scan.add_argument("--quint", default="quint")
     p_scan.add_argument("--actor", required=True)
     p_scan.set_defaults(func=cmd_scan_models)
+
+    p_sources = sub.add_parser("scan-sources", help="record Phase 4 source fields")
+    p_sources.add_argument("files", nargs="*", help="repository-relative listed sources (default: all)")
+    p_sources.add_argument("--actor", required=True)
+    p_sources.set_defaults(func=cmd_scan_sources)
+
+    p_source_text = sub.add_parser("source-text", help="print current source fields as JSON lines")
+    p_source_text.add_argument("files", nargs="*")
+    p_source_text.set_defaults(func=cmd_source_text)
+
+    p_clause = sub.add_parser("clause", help="add|revise|retire ID; spans are FILE#POINTER[@START-END]")
+    p_clause.add_argument("clause_action", choices=["add", "revise", "retire"])
+    p_clause.add_argument("id")
+    p_clause.add_argument("--kind")
+    p_clause.add_argument("--scope")
+    p_clause.add_argument("--trigger")
+    p_clause.add_argument("--outcome")
+    p_clause.add_argument("--text")
+    p_clause.add_argument("--span", action="append")
+    p_clause.add_argument("--reason")
+    p_clause.add_argument("--actor", required=True)
+    p_clause.set_defaults(func=cmd_clause)
+
+    p_span = sub.add_parser("span", help="exclude FILE#POINTER[@START-END] --reason R")
+    p_span.add_argument("span_action", choices=["exclude", "gaps"])
+    p_span.add_argument("span", nargs="?")
+    p_span.add_argument("--reason")
+    p_span.add_argument("--actor", required=True)
+    p_span.set_defaults(func=cmd_span)
+
+    p_apply = sub.add_parser("apply", help="apply clause/exclude JSON lines; applied lines are skipped")
+    p_apply.add_argument("file")
+    p_apply.add_argument("--actor", required=True)
+    p_apply.set_defaults(func=cmd_apply)
 
     p_obligation = sub.add_parser("obligation")
     p_obligation.add_argument("obligation_action", choices=["add", "retire"])

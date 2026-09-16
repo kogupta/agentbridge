@@ -383,5 +383,53 @@ class ObligationTests(unittest.TestCase):
                 conn.close()
 
 
+class SourceClauseTests(unittest.TestCase):
+    def test_json_pointer_expansion_yields_scalar_leaves(self) -> None:
+        doc = {"decisions": {"a/b": "x", "n": {"k": [1, None]}}, "rows": [{"c": "v"}]}
+        leaves = dict(leaf for p, node in tracker.expand_pointer(doc, "/decisions/*")
+                      for leaf in tracker.json_leaves(node, p))
+        self.assertEqual(leaves, {"/decisions/a~1b": "x", "/decisions/n/k/0": "1", "/decisions/n/k/1": "null"})
+        self.assertEqual(tracker.expand_pointer(doc, "/missing/*"), [])
+
+    def test_scan_clause_span_and_gate_queries(self) -> None:
+        with tempfile.TemporaryDirectory(dir=str(WORK_DIR)) as tmp:
+            db = init_db(Path(tmp))
+            rel = "native-agent-docs/product.md"
+            run(db, "scan-sources", rel, "--actor", "author:agent")
+            run(db, "scan-sources", rel, "--actor", "author:agent")  # unchanged digest: no new event
+            conn = tracker.connect(db, readonly=True)
+            try:
+                self.assertEqual(conn.execute(
+                    "SELECT COUNT(*) FROM event WHERE command = 'scan-sources'").fetchone()[0], 1)
+                length = conn.execute("SELECT end_offset FROM current_source_field WHERE file = ? AND pointer = 'L136'",
+                                      (rel,)).fetchone()[0]
+            finally:
+                conn.close()
+            with self.assertRaises(SystemExit):  # span past the field end
+                run(db, "clause", "add", "C1", "--kind", "invariant", "--scope", "local", "--text", "t",
+                    "--span", f"{rel}#L136@0-{length + 1}", "--actor", "author:agent")
+            with self.assertRaises(SystemExit):  # no span
+                run(db, "clause", "add", "C1", "--kind", "invariant", "--scope", "local", "--text", "t",
+                    "--actor", "author:agent")
+            run(db, "clause", "add", "C1", "--kind", "invariant", "--scope", "local", "--text", "first half",
+                "--span", f"{rel}#L136@0-10", "--actor", "author:agent")
+            run(db, "span", "exclude", f"{rel}#L136@10-{length}", "--reason", "narrative",
+                "--actor", "author:agent")
+            run(db, "clause", "revise", "C1", "--text", "revised", "--actor", "author:agent")
+            with self.assertRaises(SystemExit):
+                run(db, "clause", "retire", "C1", "--actor", "author:agent")  # no reason
+            conn = tracker.connect(db, readonly=True)
+            try:
+                uncovered = conn.execute((tracker.QUERIES / "uncovered_source_spans.sql").read_text()).fetchall()
+                self.assertNotIn(("L136",), {(r["pointer"],) for r in uncovered})
+                self.assertIn(("L138",), {(r["pointer"],) for r in uncovered})
+                self.assertEqual(conn.execute(
+                    "SELECT COUNT(*) FROM clause_source WHERE clause_id = 'C1' AND clause_rev = 2").fetchone()[0], 1)
+                self.assertEqual(conn.execute((tracker.QUERIES / "stale_clauses.sql").read_text()).fetchall(), [])
+            finally:
+                conn.close()
+            run(db, "clause", "retire", "C1", "--reason", "split", "--actor", "author:agent")
+
+
 if __name__ == "__main__":
     unittest.main()

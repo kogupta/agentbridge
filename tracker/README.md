@@ -31,7 +31,12 @@ Python 3 standard library only. Every connection sets `PRAGMA foreign_keys=ON`.
 | `review open SUBJECT --basis DIGEST` / `close ROUND --outcome passed\|failed` | implemented | one open round per subject; `passed` needs every Blocker/Major in the round `verified`, none stale, and evidence with subject `review:ROUND` |
 | `finding add --round R --severity S --target-kind K --target-id T --summary TEXT [--category C] [ID]` | implemented | stores the target's current revision; ID defaults to `R<round>-<nnn>` |
 | `finding address\|reject\|defer\|reopen ID --reason R`, `finding verify ID` | implemented | transitions are checked; `verify` must come from an actor other than the disposer |
-| `scan-sources`, `clause`, `span exclude`, `binding` | pending | Phase 4 and Phase 5 |
+| `scan-sources [FILE ...] --actor A` | implemented | records one `source_field` per listed field (plan Phase 4 source list); unchanged file digests are skipped; a missing listed field fails the scan |
+| `source-text [FILE ...]` | implemented | prints current fields as JSON lines (`span`, `length`, `text`) for clause authoring |
+| `clause add\|revise ID --kind K --scope S --text T --span FILE#POINTER[@START-END] [--trigger] [--outcome]`, `clause retire ID --reason R` | implemented | spans are checked against the current source field; revise keeps unspecified fields and spans |
+| `span exclude FILE#POINTER[@START-END] --reason R`, `span gaps` | implemented | `gaps` excludes uncovered segments that hold only whitespace, punctuation or a list label |
+| `apply FILE.jsonl --actor A` | implemented | runs `clause add` / `span exclude` for each line; a span can be `{"at": FILE#POINTER, "quote": TEXT}` (unique occurrence); applied lines are skipped on a rerun |
+| `binding` | pending | Phase 5 |
 | `export-roundtrip` | covered by `tests/test_tracker.py` | full-history export/rebuild comparison |
 
 ## Tables (14)

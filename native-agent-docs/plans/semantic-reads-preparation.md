@@ -88,7 +88,7 @@ Revision 2 findings:
 3. Phase 2b records the Phase 2a results into the tracker after Phase 3.
 4. **Merge gate before Phase 2c and Phase 4:**
    - `tracker.py selftest` passes.
-   - Every Phase 2a check has an `evidence` row whose `basis_digest` equals the current sha256 of its `.qnt` file.
+   - Every Phase 2a check has an `evidence` row whose `params` carry `model_sha256` equal to the current sha256 of its `.qnt` file. The `basis_digest` column holds the git HEAD of the recording (owner decision 2026-09-16: the plan follows the tracker).
    - `model_action` is current for those exact digests.
 5. Phase 2c independently reviews the model, tracker schema/guards and model evidence. It must pass before Phase 4.
 6. Phase 4 (clauses), then Phase 5 (bindings).
@@ -397,7 +397,7 @@ Sources, scanned into `source_field`:
 
 | Source | Fields |
 |---|---|
-| `native-agent-docs/product.md` | byte ranges of lines `:136-158` (I2-I13), `:179-189` (Reads and identity), and `:229` (retry bound) |
+| `native-agent-docs/product.md` | one field per non-blank line in lines `:136-158` (I2-I13), `:179-189` (Reads and identity), and `:229` (retry bound); pointer `L<n>` |
 | `native-agent-docs/read-*/spec.json` | `/scope`, `/non_goals/*`, `/assumptions/*`, `/requirements/*/statement`, `/acceptance/*/when`, `/acceptance/*/then`, `/acceptance/*/target`, `/decisions/<key>` (each key is its own field), `/operation_matrix/*/*`, `/null_boundary_matrix/*/*`, `/type_safety_audit/*/invalid`, `/type_safety_audit/*/type_api_prevention`, `/type_safety_audit/*/residual_runtime_obligation`, `/type_safety_audit/*/justification`, `/stages/*/entry`, `/stages/*/exit`, `/stages/*/outcome`, `/evidence/*/description` |
 
 The scan records a stable `source_field` observation for every listed field at the whole-file digest. No field is silently dropped; intentionally non-normative text receives a `span exclude` row with a reason.
