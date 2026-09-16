@@ -772,6 +772,82 @@ def cmd_obligation(args: argparse.Namespace) -> None:
                  existing["module"], existing["name"], existing["model_event_id"], existing["kind"],
                  args.reason, event_id))
             print(f"retired obligation {args.id}")
+        return
+
+
+# ------------------------------------------------------------------------- bindings
+
+BINDING_VERDICTS = ("KEEP", "ADAPT", "PORT", "REPLACE", "DELETE", "NEW")
+
+
+def require_evidence(conn: sqlite3.Connection, subjects: list[str], label: str) -> None:
+    if not subjects:
+        raise SystemExit(f"Error: binding requires --{label}-evidence")
+    for subject in subjects:
+        row = conn.execute(
+            "SELECT 1 FROM evidence WHERE subject = ? AND result = 'pass' LIMIT 1",
+            (subject,)).fetchone()
+        if row is None:
+            raise SystemExit(f"Error: no passing evidence for {subject}")
+
+
+def cmd_binding(args: argparse.Namespace) -> None:
+    actor_id, kind = parse_actor(args.actor)
+    with write_tx(args.db) as conn:
+        existing = latest_revision(conn, "binding", args.id)
+        if args.binding_action == "set":
+            if args.verdict not in BINDING_VERDICTS:
+                raise SystemExit(
+                    f"Error: binding verdict must be one of {', '.join(BINDING_VERDICTS)}")
+            if not args.note:
+                raise SystemExit("Error: binding set requires --note")
+            if existing is not None and existing["status"] == "active":
+                raise SystemExit(f"Error: binding {args.id} already has an active revision")
+            model = conn.execute(
+                "SELECT module, name, event_id FROM current_model_action "
+                "WHERE module = ? AND name = ? AND kind = 'action'",
+                (args.module, args.action)).fetchone()
+            if model is None:
+                raise SystemExit(
+                    f"Error: {args.module}::{args.action} is not in the current model scan")
+            other = conn.execute(
+                "SELECT id FROM current_binding WHERE module = ? AND model_action = ? AND id <> ?",
+                (args.module, args.action, args.id)).fetchone()
+            if other is not None:
+                raise SystemExit(
+                    f"Error: {args.module}::{args.action} already has current binding {other['id']}")
+            if args.verdict in ("NEW", "DELETE"):
+                if not args.reason:
+                    raise SystemExit(f"Error: binding {args.verdict} requires --reason")
+                require_evidence(conn, args.absence_evidence, "absence")
+            else:
+                if not args.java_symbol or not args.pi_symbol:
+                    raise SystemExit(
+                        f"Error: binding {args.verdict} requires --java-symbol and --pi-symbol")
+                require_evidence(conn, args.symbol_evidence, "symbol")
+            rev = existing["rev"] + 1 if existing is not None else 1
+            event_id = record_event(conn, actor_id, kind, "binding set", args.id, git_head())
+            conn.execute(
+                "INSERT INTO binding(id, rev, module, model_action, model_event_id, java_symbol,"
+                " pi_symbol, verdict, note, status, reason, event_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?,"
+                " ?, 'active', ?, ?)",
+                (args.id, rev, model["module"], model["name"], model["event_id"],
+                 args.java_symbol, args.pi_symbol, args.verdict, args.note, args.reason, event_id))
+            print(f"set binding {args.id} ({args.verdict})")
+        else:
+            if existing is None or existing["status"] == "retired":
+                raise SystemExit(f"Error: no active binding {args.id}")
+            if not args.reason:
+                raise SystemExit("Error: binding retire requires --reason")
+            event_id = record_event(conn, actor_id, kind, "binding retire", args.id, git_head())
+            conn.execute(
+                "INSERT INTO binding(id, rev, module, model_action, model_event_id, java_symbol,"
+                " pi_symbol, verdict, note, status, reason, event_id) VALUES (?, ?, ?, ?, ?, ?,"
+                " ?, ?, ?, 'retired', ?, ?)",
+                (args.id, existing["rev"] + 1, existing["module"], existing["model_action"],
+                 existing["model_event_id"], existing["java_symbol"], existing["pi_symbol"],
+                 existing["verdict"], existing["note"], args.reason, event_id))
+            print(f"retired binding {args.id}")
 
 
 # ------------------------------------------------------------------ reviews and findings
@@ -1011,6 +1087,21 @@ def build_parser() -> argparse.ArgumentParser:
     p_query.set_defaults(func=cmd_query)
 
     p_claim = sub.add_parser("claim")
+
+    p_binding = sub.add_parser("binding", help="set|retire model-action bindings")
+    p_binding.add_argument("binding_action", choices=["set", "retire"])
+    p_binding.add_argument("id")
+    p_binding.add_argument("--module")
+    p_binding.add_argument("--action")
+    p_binding.add_argument("--java-symbol")
+    p_binding.add_argument("--pi-symbol")
+    p_binding.add_argument("--verdict")
+    p_binding.add_argument("--note")
+    p_binding.add_argument("--absence-evidence", action="append", default=[])
+    p_binding.add_argument("--symbol-evidence", action="append", default=[])
+    p_binding.add_argument("--reason")
+    p_binding.add_argument("--actor", required=True)
+    p_binding.set_defaults(func=cmd_binding)
     p_claim.add_argument("claim_action", choices=["acquire", "release"])
     p_claim.add_argument("subject")
     p_claim.add_argument("--actor", required=True)

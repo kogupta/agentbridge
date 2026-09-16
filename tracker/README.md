@@ -36,7 +36,7 @@ Python 3 standard library only. Every connection sets `PRAGMA foreign_keys=ON`.
 | `clause add\|revise ID --kind K --scope S --text T --span FILE#POINTER[@START-END] [--trigger] [--outcome]`, `clause retire ID --reason R` | implemented | spans are checked against the current source field; revise keeps unspecified fields and spans |
 | `span exclude FILE#POINTER[@START-END] --reason R`, `span gaps` | implemented | `gaps` excludes uncovered segments that hold only whitespace, punctuation or a list label |
 | `apply FILE.jsonl --actor A` | implemented | runs `clause add` / `span exclude` for each line; a span can be `{"at": FILE#POINTER, "quote": TEXT}` (unique occurrence); applied lines are skipped on a rerun |
-| `binding` | pending | Phase 5 |
+| `binding set ID --module M --action A --verdict V ...` / `retire ID --reason R` | implemented | active model actions require passing symbol evidence; NEW/DELETE require passing absence evidence; revisions are append-only |
 | `export-roundtrip` | covered by `tests/test_tracker.py` | full-history export/rebuild comparison |
 
 ## Tables (14)

@@ -186,6 +186,71 @@ def init_db(tmp: Path) -> Path:
     return db
 
 
+class BindingCommandTests(unittest.TestCase):
+    def seed_model(self, db: Path, *, with_evidence: bool = False) -> None:
+        conn = tracker.connect(db)
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute("INSERT INTO actor(id, kind) VALUES ('modeler', 'agent')")
+            conn.execute(
+                "INSERT INTO event(id, at, actor, command, subject, basis_digest)"
+                " VALUES (1, 't', 'modeler', 'scan-models', 'agent_coarse', 'digest')")
+            conn.execute(
+                "INSERT INTO model_action(module, name, event_id, kind, parameters, owner, source_sha256)"
+                " VALUES ('agent_coarse', 'send', 1, 'action', '[]', 'agent_coarse', 'digest')")
+            if with_evidence:
+                conn.execute(
+                    "INSERT INTO event(id, at, actor, command, subject, basis_digest)"
+                    " VALUES (2, 't', 'modeler', 'evidence record', 'absence-proof', 'digest')")
+                conn.execute(
+                    "INSERT INTO evidence(id, event_id, subject, kind, tool_version, result, basis_digest)"
+                    " VALUES (1, 2, 'absence-proof', 'query', 'test', 'pass', 'digest')")
+            conn.execute("COMMIT")
+        finally:
+            conn.close()
+
+    def test_new_requires_passing_absence_evidence(self) -> None:
+        with tempfile.TemporaryDirectory(dir=str(WORK_DIR)) as tmp:
+            db = init_db(Path(tmp))
+            self.seed_model(db)
+            with self.assertRaises(SystemExit):
+                run(db, "binding", "set", "B1", "--module", "agent_coarse",
+                    "--action", "send", "--verdict", "NEW", "--note", "not implemented",
+                    "--actor", "modeler:agent")
+
+    def test_new_and_retire_are_revisioned(self) -> None:
+        with tempfile.TemporaryDirectory(dir=str(WORK_DIR)) as tmp:
+            db = init_db(Path(tmp))
+            self.seed_model(db, with_evidence=True)
+            run(db, "binding", "set", "B1", "--module", "agent_coarse",
+                "--action", "send", "--verdict", "NEW", "--note", "not modeled",
+                "--reason", "no Java or Pi symbol in bounded searches",
+                "--absence-evidence", "absence-proof", "--actor", "modeler:agent")
+            run(db, "binding", "retire", "B1", "--reason", "replaced", "--actor", "modeler:agent")
+            conn = tracker.connect(db, readonly=True)
+            try:
+                rows = conn.execute(
+                    "SELECT rev, status, verdict FROM binding WHERE id = 'B1' ORDER BY rev").fetchall()
+                self.assertEqual([tuple(row) for row in rows],
+                                 [(1, "active", "NEW"), (2, "retired", "NEW")])
+                self.assertEqual(conn.execute("SELECT COUNT(*) FROM current_binding").fetchone()[0], 0)
+            finally:
+                conn.close()
+    def test_action_has_only_one_current_binding(self) -> None:
+        with tempfile.TemporaryDirectory(dir=str(WORK_DIR)) as tmp:
+            db = init_db(Path(tmp))
+            self.seed_model(db, with_evidence=True)
+            run(db, "binding", "set", "B1", "--module", "agent_coarse",
+                "--action", "send", "--verdict", "NEW", "--note", "not modeled",
+                "--reason", "no Java or Pi symbol in bounded searches",
+                "--absence-evidence", "absence-proof", "--actor", "modeler:agent")
+            with self.assertRaises(SystemExit):
+                run(db, "binding", "set", "B2", "--module", "agent_coarse",
+                    "--action", "send", "--verdict", "NEW", "--note", "duplicate",
+                    "--reason", "duplicate", "--absence-evidence", "absence-proof",
+                    "--actor", "modeler:agent")
+ 
+
 class MigrationTests(unittest.TestCase):
     def test_existing_001_ledger_upgrades_and_keeps_findings(self) -> None:
         with tempfile.TemporaryDirectory(dir=str(WORK_DIR)) as tmp:
