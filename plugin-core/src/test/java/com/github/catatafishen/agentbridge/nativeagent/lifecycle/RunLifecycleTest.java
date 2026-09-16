@@ -16,6 +16,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -430,6 +431,32 @@ class RunLifecycleTest {
             lifecycle.execute(freshBatch, freshB, () -> { }));
         assertEquals(Lifecycle.idle(), lifecycle.snapshot());
         assertInstanceOf(RunLifecycle.StartRunResult.Started.class, lifecycle.startRun());
+    }
+
+    @Test
+    void snapshotsReportSettlementAndAbsentBatchObservation() {
+        RunLifecycle lifecycle = new RunLifecycle();
+        RunHandle run = startedRun(lifecycle);
+        Call.Id first = new Call.Id("first");
+        Call.Id second = new Call.Id("second");
+        Batch.Handle batch = begunBatch(lifecycle, run, first, second);
+
+        assertFalse(availableSnapshot(lifecycle.batchSnapshot(batch)).isSettled());
+        lifecycleExecute(lifecycle, batch, first);
+        assertFalse(availableSnapshot(lifecycle.batchSnapshot(batch)).isSettled());
+
+        RunLifecycle.StopResult stopped = lifecycle.stop(run);
+        assertEquals(Lifecycle.Phase.STOPPING, stoppedPhase(stopped));
+        assertInstanceOf(Batch.Observation.Present.class,
+            ((RunLifecycle.StopResult.Acknowledged) stopped).batch());
+        assertTrue(availableSnapshot(lifecycle.batchSnapshot(batch)).isSettled());
+
+        RunLifecycle noBatch = new RunLifecycle();
+        RunHandle noBatchRun = startedRun(noBatch);
+        RunLifecycle.StopResult noBatchStopped = noBatch.stop(noBatchRun);
+        assertEquals(Lifecycle.Phase.STOPPING, stoppedPhase(noBatchStopped));
+        assertEquals(Batch.Observation.Absent.Instance,
+            ((RunLifecycle.StopResult.Acknowledged) noBatchStopped).batch());
     }
 
     @Test

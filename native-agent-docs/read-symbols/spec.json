@@ -405,6 +405,13 @@
       "next_phase": "INDEXING"
     },
     {
+      "operation": "search_symbols",
+      "phase": "SMART",
+      "precondition": "more results than the collection cap",
+      "result": "TOO_MANY_RESULTS with narrowing hint; no page",
+      "next_phase": "SMART"
+    },
+    {
       "operation": "get_file_outline|search_symbols restricted to a file",
       "phase": "SMART|INDEXING",
       "precondition": "file is not Java",

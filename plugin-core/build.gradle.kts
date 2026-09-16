@@ -2,6 +2,7 @@ plugins {
     id("java")
     kotlin("jvm") version "2.4.10"
     id("org.jetbrains.intellij.platform") version "2.18.1"
+    id("info.solidsoft.pitest") version "1.19.0"
 }
 
 repositories {
@@ -27,6 +28,7 @@ dependencies {
     implementation("org.jetbrains:annotations:${providers.gradleProperty("annotationsVersion").get()}")
 
     testImplementation("org.junit.jupiter:junit-jupiter:${providers.gradleProperty("junitVersion").get()}")
+    testImplementation("net.jqwik:jqwik:${providers.gradleProperty("jqwikVersion").get()}")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
     // The IntelliJ Platform test framework registers com.intellij.tests.JUnit5TestSessionListener, which
     // loads JUnit 4 classes; without this the Gradle test executor fails to start.
@@ -52,4 +54,13 @@ tasks.withType<JavaCompile>().configureEach {
 
 tasks.test {
     useJUnitPlatform()
+}
+
+pitest {
+    pitestVersion.set(providers.gradleProperty("pitestVersion"))
+    junit5PluginVersion.set(providers.gradleProperty("pitestJunit5PluginVersion"))
+    outputFormats.set(setOf("XML", "HTML"))
+    timestampedReports.set(false)
+    fullMutationMatrix.set(true)
+    targetClasses.set(providers.gradleProperty("pitTargets").map { it.split(',').toSet() })
 }

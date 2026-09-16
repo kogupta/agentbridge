@@ -9,7 +9,7 @@
 
 ## Workspace and tooling
 
-- Keep temporary files, plans, generated evidence, and disposable probes under `.agent-work/`. Do not write to `/tmp`, home directories, or outside the repository unless the user explicitly requests it.
+- When a required JDK or SDK version is available through SDKMAN, initialize SDKMAN and select it with `sdk use` before invoking Java, Kotlin, or Gradle tools; let Gradle resolve repository-pinned compiler and plugin versions.
 - When `idea-facade` is registered, read `skill://jb-code-nav` before investigating code structure, symbol identity, references, call graphs, implementations, dependency source, refactors, diagnostics, tests, or builds.
 - Call `idea_facade_status` before relying on IDEA Facade capability. Do not pass a project path; the server binds the project.
 - Prefer IDEA Facade composite tools for IntelliJ-aware reads, searches, refactors, diagnostics, tests, and builds. Use CLI Git/GitHub or OMP native Git when the facade has no suitable Git operation.
