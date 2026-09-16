@@ -208,10 +208,10 @@ Invariants, each with a mutant and a witness:
 | INV-C1 | Each call has at most one result. While a request is in flight, every call of the previous batch has exactly one result. | `mut_completeEarly`: `nextCall` returns Complete with unrecorded results | W-SUCCESS |
 | INV-C2 | If the lifecycle was not `RUNNING` before a step in the same run, the step starts no effect | `mut_admitAfterStop`: admission ignores the lifecycle phase | W-STOP-WAIT |
 | INV-C3 | `IDLE` or `DISPOSED` implies no active run and a settled batch | `mut_finishDuringEffect` | W-STOP-WAIT |
-| INV-C4 | No effect starts twice, a started call never becomes `PENDING` again, and a begun batch's call IDs are disjoint from every previously accepted occurrence of the same run (including admitted-only occurrences) | `mut_acceptReusedIds` and `mut_reuseStartedOnly` | W-ID-REUSE |
+| INV-C4 | No effect starts twice, a started call never becomes `PENDING` again, and a begun batch's call IDs are disjoint from every previously accepted occurrence of the same run (including admitted-only occurrences) | `mut_acceptReusedIds`; `mut_reuseStartedOnly` (own step `step_mut_INV_C4__reuseStartedOnly`) | W-ID-REUSE |
 | INV-C5 | Within one generation, the request head is constant and request N is a prefix of request N+1 | `mut_compactHistory`: history rewritten without a new generation | W-RETRY |
 | INV-C6 | Disposed content has no provisional delivery, and a `DISPOSED` session's history does not change | `mut_provisionalAfterDispose` | W-CLOSE |
-| INV-C7 | Rejecting a reused call ID commits no assistant item: a `REQUESTING → STOPPING` step that drops a `CALLS` turn leaves history unchanged | `mut_appendBeforeReject` | W-ID-REUSE |
+| INV-C7 | Rejecting a reused call ID commits no assistant item: a `REQUESTING → STOPPING` step that drops a `CALLS` or `LENGTH_CALLS` turn leaves history unchanged | `mut_appendBeforeReject`; `mut_appendBeforeRejectLength` (own step `step_mut_INV_C7__length`) | W-ID-REUSE |
 | INV-R1 | No registration after cancel or dispose | `mut_registerIgnoringCancel` | W-STOP-WAIT |
 | INV-R2 | Effect settles only after the computation terminates (`DONE`, `ABORTED` or `TIMED_OUT`) | `mut_settleEarly` | W-RESTART |
 | INV-R3 | Refused admission makes no platform access | `mut_accessAfterRefusal` | W-REFUSED |
@@ -270,7 +270,9 @@ A fresh reviewer opens a tracker review round against the exact Phase 2a model d
 
 - no open Blocker or Major;
 - all model files, parser outputs, model actions and evidence rows use the same basis digests;
-- `unbound_model_actions`, `interaction_without_obligation` and tracker self-tests pass;
+- tracker self-tests pass;
+- `unbound_model_actions` runs and lists only actions from the current model scan. Bindings start in Phase 5, so this gate does not require 0 rows (owner decision 2026-09-16). The 0-row gate stays in Phase 5.
+- `interaction_without_obligation` runs. Clauses start in Phase 4, so its 0-row gate stays in Phase 4 step 5;
 - the model review explicitly confirms that model omission and Java conformance remain separate obligations.
 
 Phase 4 cannot start without this receipt.
@@ -479,13 +481,13 @@ Model-to-Java action mapping is total. The model action is the row key; each row
 | `limitStop` | `RunSession.beginRequest` returns a refusal; the driver calls `RunSession.stop(run)` | phase STOPPING; pending calls cancelled |
 | `providerAttempt(outcome, ids)` | fake `ProviderTransport` returns `Terminal` (text or calls with the given IDs), `Retryable` or `Failed` to `NativeRunDriver.requestWithRetry` | held turn and IDs; retry state; STOPPING after a second retryable or a failure |
 | `deliverProvisional` | `RunSession.tryUpdateProvisional(run, text)` from the fake transport callback | `provisional()` is `Present` only when not disposed |
-| `acceptTurn` | `RunSession.acceptTurn(run, turn)`; outside REQUESTING the call throws and the driver stops | assistant message appended; EXECUTING_TOOLS with the call IDs, IDLE after text, or STOPPING after `CALL_ID_ALREADY_ACCEPTED` |
+| `acceptTurn` | `RunSession.acceptTurn(run, turn)`; outside REQUESTING the call throws and the driver stops | accepted turn: assistant message appended, then EXECUTING_TOOLS with the call IDs, or IDLE after text or length calls. Reused call ID: STOPPING after `CALL_ID_ALREADY_ACCEPTED`, no assistant message, history unchanged |
 | `nextCall` | `RunSession.nextCall(run)` | `Execute` for the next call, or `Complete` and phase REQUESTING |
 | `admit(result)` | `CallAdmission.execute(effect)` entered on a dedicated thread with a latch in the Effect; `LIMITED` uses a refusing tool budget | `Rejected` after stop or close; `Limited` with call COMPLETED and no effect; `Executed` with EXECUTING observed while the latch is held |
 | `effectFinish(ok)` | release the latch, or throw from the Effect, inside the same `CallAdmission.execute` harness | terminal `Call.Status` after the synchronous invocation returns |
 | `recordResult` | `RunSession.recordToolResult(run, toolResult)`; then `stop` or `stopForLimit` as `NativeRunDriver.executeCalls` does | one result for the call; cancelled results drained in order when STOPPING |
 | `stop` | `RunSession.stop(run)` or `stopIfCurrent(run)` | phase STOPPING; pending calls cancelled; cancelled results drained in order |
-| `close` | `RunSession.dispose()` | `DISPOSED` when no run exists; otherwise STOPPING, provisional cleared, pending cancelled, no drain (`RunSession.java:201-223`) |
+| `close` | `RunSession.dispose()` | `DISPOSED` when no run exists; otherwise STOPPING, provisional cleared, pending cancelled, cancelled results drained in order (`RunSession.java:205-229`) |
 | `finish` | `RunSession.finish(run)` after the driver is idle and the batch settled | `IDLE` when not disposed; `DISPOSED` after `dispose()` |
 | `newGeneration` | `CacheGeneration.replacement(previousSession, reset, id, head)` with `previousSession.phase() == IDLE` and a non-`SessionStart` reset (`CacheGeneration.java:35-46`); later requests use the new generation | new generation ID; the next request does not need the previous prefix; replacement from a non-IDLE session throws |
 | `startRead`, `refuseRead`, `smartWaitTick`, `dumbEnter`, `dumbExit`, `editDocument`, `commitDocuments`, `writeAction`, `compute`, `abortComputation`, `register`, `disposeRegistry`, `cancel`, `settle` | no current Java symbol in this plan | trace metadata marks these as `read_adapter_only`; they are excluded from Java replay and retained as breakdown-plan read-kernel inputs |

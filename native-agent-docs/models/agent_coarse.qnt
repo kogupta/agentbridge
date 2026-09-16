@@ -485,9 +485,11 @@ module agent_coarse {
       and (prev.phase == "DISPOSED" implies s.history == prev.history)
 
   // I3/I4: rejecting a reused call ID happens before the assistant item is
-  // committed: no REQUESTING -> STOPPING step with a dropped CALLS turn appends history.
+  // committed: no REQUESTING -> STOPPING step with a dropped CALLS or LENGTH_CALLS turn
+  // appends history.
   val INV_C7 =
-    (s.phase == "STOPPING" and prev.phase == "REQUESTING" and prev.turn == "CALLS" and s.turn == "NONE")
+    (s.phase == "STOPPING" and prev.phase == "REQUESTING"
+       and (prev.turn == "CALLS" or prev.turn == "LENGTH_CALLS") and s.turn == "NONE")
       implies s.history == prev.history
 
   // ---- Consistency lemmas (checked like invariants; they tie cursor and effect
@@ -589,7 +591,7 @@ module agent_coarse {
     prev' = s,
   }
 
-  // INV_C7: reuse is rejected only against started occurrences, so a call that was
+  // INV_C4: reuse is rejected only against started occurrences, so a call that was
   // merely admitted (LIMITED/REJECTED) can be accepted again.
   action mut_reuseStartedOnly = all {
     s.phase == "REQUESTING",
@@ -609,14 +611,26 @@ module agent_coarse {
     prev' = s,
   }
 
-  // Mutant steps: check with --step=step_mut_<INV> --invariant=<INV>; a counterexample
-  // is required. They live here, not in importing modules, because Quint 0.32.0
+  // INV_C7: the assistant item of a LENGTH_CALLS turn is committed before a reused
+  // batch is rejected.
+  action mut_appendBeforeRejectLength = all {
+    s.phase == "REQUESTING",
+    s.turn == "LENGTH_CALLS",
+    s.acceptedIds.contains(key0(s)),
+    s' = stopped(acceptedTurn(s)),
+    prev' = s,
+  }
+
+  // Mutant steps: check with --step=step_mut_<INV>[__<variant>] --invariant=<INV>; a
+  // counterexample is required. One mutant per step, so each fault is detected on its own. They live here, not in importing modules, because Quint 0.32.0
   // fails to flatten `import ... as B` names for TLC and Apalache (QNT404).
   action step_mut_INV_C1 = any { step, mut_completeEarly }
   action step_mut_INV_C2 = any { step, mut_admitAfterStop }
   action step_mut_INV_C3 = any { step, mut_finishDuringEffect }
-  action step_mut_INV_C4 = any { step, mut_acceptReusedIds, mut_reuseStartedOnly }
+  action step_mut_INV_C4 = any { step, mut_acceptReusedIds }
+  action step_mut_INV_C4__reuseStartedOnly = any { step, mut_reuseStartedOnly }
   action step_mut_INV_C5 = any { step, mut_compactHistory }
   action step_mut_INV_C6 = any { step, mut_provisionalAfterDispose }
   action step_mut_INV_C7 = any { step, mut_appendBeforeReject }
+  action step_mut_INV_C7__length = any { step, mut_appendBeforeRejectLength }
 }

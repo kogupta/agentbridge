@@ -8,7 +8,7 @@
 # edit here:
 #   val INV_* / LEM_* / REF_*   must hold             (pass)
 #   val W_*                     must be reachable      (not(W) must be violated)
-#   action step_mut_<X>         must violate val <X>   (mutant)
+#   action step_mut_<X>[__<v>]  must violate val <X>   (mutant; __<v> names one more mutant)
 #   action stepCorpus           builds the ITF replay corpus
 #
 # Raw output: .agent-work/evidence/phase2/<name>.txt. One row per check in summary.tsv:
@@ -84,7 +84,7 @@ verify() {
       check "witness_${mod}_$w" fail quint verify "$f" --main="$mod" --invariant="not($w)" "${TLC[@]}"
     done
     for x in $(mutants "$f"); do
-      check "mutant_${mod}_$x" fail quint verify "$f" --main="$mod" --step="step_mut_$x" --invariant="$x" "${TLC[@]}"
+      check "mutant_${mod}_$x" fail quint verify "$f" --main="$mod" --step="step_mut_$x" --invariant="${x%%__*}" "${TLC[@]}"
     done
   done
 }
